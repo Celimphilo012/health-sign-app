@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
 import '../models/message_model.dart';
+import '../models/user_model.dart';
 import '../services/firestore_service.dart';
 import '../services/speech_service.dart';
 
@@ -9,12 +12,15 @@ class ConversationProvider extends ChangeNotifier {
   final SpeechService _speechService = SpeechService();
   final _uuid = const Uuid();
 
+  StreamSubscription<List<MessageModel>>? _messagesSub;
+
   List<MessageModel> _messages = [];
   String _conversationId = '';
   bool _isListening = false;
   bool _isSpeaking = false;
   String _liveText = '';
   String _detectedGesture = '';
+  UserModel? _chattingWith;
 
   List<MessageModel> get messages => _messages;
   String get conversationId => _conversationId;
@@ -22,27 +28,41 @@ class ConversationProvider extends ChangeNotifier {
   bool get isSpeaking => _isSpeaking;
   String get liveText => _liveText;
   String get detectedGesture => _detectedGesture;
+  UserModel? get chattingWith => _chattingWith;
 
-  Future<void> initialize(String userId) async {
-    await _speechService.initTts();
-    await _speechService.initStt();
-    _conversationId = await _firestoreService.getOrCreateConversation(userId);
-
-    _firestoreService.getMessagesStream(_conversationId).listen((msgs) {
+  // ── Initialize with a specific conversationId ─────────
+  // Called when nurse accepts / patient initializes
+  Future<void> initWithConversationId(String convId) async {
+    if (convId == _conversationId && convId.isNotEmpty) return;
+    _conversationId = convId;
+    _messagesSub?.cancel();
+    _messagesSub =
+        _firestoreService.getMessagesStream(convId).listen((msgs) {
       _messages = msgs;
       notifyListeners();
     });
-
     notifyListeners();
   }
 
+  // ── Initialize by userId (patient side) ───────────────
+  Future<void> initialize(String userId,
+      {String role = 'patient'}) async {
+    await _speechService.initTts();
+    await _speechService.initStt();
+
+    final convId =
+        await _firestoreService.getOrCreateConversation(userId);
+    await initWithConversationId(convId);
+  }
+
+  // ── Send message ──────────────────────────────────────
   Future<void> sendMessage({
     required String text,
     required String senderId,
     required MessageSender senderRole,
     required MessageType type,
   }) async {
-    if (text.trim().isEmpty) return;
+    if (text.trim().isEmpty || _conversationId.isEmpty) return;
 
     final message = MessageModel(
       id: _uuid.v4(),
@@ -55,9 +75,11 @@ class ConversationProvider extends ChangeNotifier {
     );
 
     await _firestoreService.saveMessage(message);
-    await _firestoreService.updateLastMessage(_conversationId, text.trim());
+    await _firestoreService.updateLastMessage(
+        _conversationId, text.trim());
   }
 
+  // ── TTS ───────────────────────────────────────────────
   Future<void> speakText(String text) async {
     _isSpeaking = true;
     notifyListeners();
@@ -72,6 +94,7 @@ class ConversationProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── STT ───────────────────────────────────────────────
   Future<void> startListening() async {
     await _speechService.startListening(
       onResult: (text) {
@@ -96,6 +119,7 @@ class ConversationProvider extends ChangeNotifier {
     );
   }
 
+  // ── Gesture ───────────────────────────────────────────
   void setDetectedGesture(String gesture) {
     _detectedGesture = gesture;
     notifyListeners();
@@ -106,8 +130,16 @@ class ConversationProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  void clearMessages() {
+    _messages = [];
+    _conversationId = '';
+    _messagesSub?.cancel();
+    notifyListeners();
+  }
+
   @override
   void dispose() {
+    _messagesSub?.cancel();
     _speechService.dispose();
     super.dispose();
   }

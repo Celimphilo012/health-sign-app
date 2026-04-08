@@ -1,8 +1,8 @@
 import 'dart:io';
-import 'dart:math';
+import 'dart:ui';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
-import 'package:google_mlkit_commons/google_mlkit_commons.dart';
+import 'package:google_mlkit_pose_detection/google_mlkit_pose_detection.dart';
 
 class GestureService {
   CameraController? _controller;
@@ -11,23 +11,19 @@ class GestureService {
   bool _isDetecting = false;
   bool _isProcessing = false;
 
-  // Gesture detection callback
-  Function(String gesture, String text, double confidence)? _onGestureDetected;
+  late PoseDetector _poseDetector;
 
   CameraController? get controller => _controller;
   bool get isInitialized => _isInitialized;
   bool get isDetecting => _isDetecting;
 
-  // ── Gesture definitions ───────────────────────────────
-  // Maps gesture names to display text
   static const Map<String, String> gestureMap = {
     'Open_Palm': 'Stop / Wait',
     'Closed_Fist': 'I am in pain',
     'Thumb_Up': 'Yes / I agree',
     'Thumb_Down': 'No / I disagree',
-    'Victory': 'I am okay / Peace',
+    'Victory': 'I am okay',
     'Pointing_Up': 'I need attention',
-    'ILoveYou': 'I love you / Thank you',
     'None': '',
   };
 
@@ -38,13 +34,18 @@ class GestureService {
     'Thumb_Down': '👎',
     'Victory': '✌️',
     'Pointing_Up': '☝️',
-    'ILoveYou': '🤟',
     'None': '🤚',
   };
 
-  // ── Initialize camera ─────────────────────────────────
   Future<void> initCamera() async {
     try {
+      _poseDetector = PoseDetector(
+        options: PoseDetectorOptions(
+          mode: PoseDetectionMode.stream,
+          model: PoseDetectionModel.accurate,
+        ),
+      );
+
       _cameras = await availableCameras();
       if (_cameras.isEmpty) return;
 
@@ -55,9 +56,9 @@ class GestureService {
 
       _controller = CameraController(
         camera,
-        ResolutionPreset.low, // Lower for faster ML processing
+        ResolutionPreset.low,
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.nv21, // Best for ML Kit
+        imageFormatGroup: ImageFormatGroup.nv21,
       );
 
       await _controller!.initialize();
@@ -68,63 +69,161 @@ class GestureService {
     }
   }
 
-  // ── Start gesture detection ───────────────────────────
   Future<void> startDetection({
     required Function(String gesture, String text, double confidence)
         onGestureDetected,
   }) async {
     if (!_isInitialized || _controller == null) return;
-    _onGestureDetected = onGestureDetected;
     _isDetecting = true;
+
+    String _lastGesture = '';
+    int _count = 0;
 
     await _controller!.startImageStream((CameraImage image) async {
       if (_isProcessing || !_isDetecting) return;
       _isProcessing = true;
 
       try {
-        await _processFrame(image);
+        final inputImage = _toInputImage(image);
+        if (inputImage == null) {
+          _isProcessing = false;
+          return;
+        }
+
+        final poses = await _poseDetector.processImage(inputImage);
+        final gesture = _classifyFromPose(poses);
+
+        if (gesture != null && gesture != 'None') {
+          if (gesture == _lastGesture) {
+            _count++;
+            if (_count == 4) {
+              onGestureDetected(
+                gesture,
+                gestureMap[gesture] ?? '',
+                0.82,
+              );
+            }
+          } else {
+            _lastGesture = gesture;
+            _count = 1;
+          }
+        } else {
+          _count = 0;
+        }
       } catch (e) {
-        debugPrint('Frame processing error: $e');
+        debugPrint('Detection error: $e');
       } finally {
         _isProcessing = false;
       }
     });
   }
 
-  // ── Process camera frame ──────────────────────────────
-  Future<void> _processFrame(CameraImage image) async {
-    // Run in isolate to avoid blocking UI
-    final result = await compute(_analyzeFrame, {
-      'planes': image.planes
-          .map((p) => {
-                'bytes': p.bytes,
-                'bytesPerRow': p.bytesPerRow,
-                'bytesPerPixel': p.bytesPerPixel,
-                'width': image.width,
-                'height': image.height,
-              })
-          .toList(),
-      'width': image.width,
-      'height': image.height,
-      'format': image.format.raw,
-    });
+  // ── Classify gesture from pose landmarks ──────────────
+  // Uses wrist + elbow positions for basic gesture detection
+  String? _classifyFromPose(List<Pose> poses) {
+    if (poses.isEmpty) return 'None';
 
-    if (result != null && _onGestureDetected != null) {
-      final gestureName = result['gesture'] as String;
-      final confidence = result['confidence'] as double;
+    final pose = poses.first;
+    final landmarks = pose.landmarks;
 
-      if (gestureName != 'None' && confidence > 0.75) {
-        final text = gestureMap[gestureName] ?? '';
-        _onGestureDetected!(gestureName, text, confidence);
+    // Get hand/wrist landmarks
+    final leftWrist = landmarks[PoseLandmarkType.leftWrist];
+    final rightWrist = landmarks[PoseLandmarkType.rightWrist];
+    final leftElbow = landmarks[PoseLandmarkType.leftElbow];
+    final rightElbow = landmarks[PoseLandmarkType.rightElbow];
+    final leftShoulder = landmarks[PoseLandmarkType.leftShoulder];
+    final rightShoulder = landmarks[PoseLandmarkType.rightShoulder];
+    final nose = landmarks[PoseLandmarkType.nose];
+
+    if (leftWrist == null && rightWrist == null) return 'None';
+
+    // Use the more confident hand
+    final wrist = (rightWrist?.likelihood ?? 0) > (leftWrist?.likelihood ?? 0)
+        ? rightWrist
+        : leftWrist;
+    final elbow = wrist == rightWrist ? rightElbow : leftElbow;
+    final shoulder = wrist == rightWrist ? rightShoulder : leftShoulder;
+
+    if (wrist == null || wrist.likelihood < 0.5) return 'None';
+
+    // ── Gesture detection using body positions ─────────
+
+    // ✋ Open Palm / Stop: wrist raised above shoulder
+    if (shoulder != null && wrist.y < shoulder.y - 50) {
+      return 'Open_Palm';
+    }
+
+    // 👍 Thumb Up: wrist above elbow, arm pointing up
+    if (elbow != null &&
+        wrist.y < elbow.y - 30 &&
+        nose != null &&
+        wrist.y < nose.y) {
+      return 'Thumb_Up';
+    }
+
+    // 👎 Thumb Down: wrist below elbow pointing down
+    if (elbow != null && wrist.y > elbow.y + 40) {
+      return 'Thumb_Down';
+    }
+
+    // ☝️ Pointing: wrist raised to face level
+    if (nose != null && wrist.y < nose.y + 30 && wrist.y > nose.y - 80) {
+      return 'Pointing_Up';
+    }
+
+    // ✊ Fist/Pain: wrist near chest level
+    if (shoulder != null &&
+        wrist.y > shoulder.y - 20 &&
+        wrist.y < shoulder.y + 80) {
+      return 'Closed_Fist';
+    }
+
+    return 'None';
+  }
+
+  InputImage? _toInputImage(CameraImage image) {
+    try {
+      final camera = _controller!.description;
+      final sensorOrientation = camera.sensorOrientation;
+
+      var rotationCompensation = sensorOrientation;
+      if (camera.lensDirection == CameraLensDirection.front) {
+        rotationCompensation = (sensorOrientation + rotationCompensation) % 360;
       }
+
+      final rotation =
+          InputImageRotationValue.fromRawValue(rotationCompensation);
+      if (rotation == null) return null;
+
+      final format = InputImageFormatValue.fromRawValue(image.format.raw);
+      if (format == null) return null;
+
+      if (image.planes.isEmpty) return null;
+      final plane = image.planes.first;
+
+      return InputImage.fromBytes(
+        bytes: plane.bytes,
+        metadata: InputImageMetadata(
+          size: Size(image.width.toDouble(), image.height.toDouble()),
+          rotation: rotation,
+          format: format,
+          bytesPerRow: plane.bytesPerRow,
+        ),
+      );
+    } catch (e) {
+      return null;
     }
   }
 
   void stopDetection() {
     _isDetecting = false;
     _isProcessing = false;
-    if (_controller != null && _controller!.value.isStreamingImages) {
-      _controller!.stopImageStream();
+    try {
+      if (_controller != null && _controller!.value.isStreamingImages) {
+        _controller!.stopImageStream();
+      }
+    } catch (e) {
+      debugPrint('Stop stream error: $e');
     }
   }
 
@@ -148,54 +247,9 @@ class GestureService {
 
   Future<void> dispose() async {
     stopDetection();
+    await _poseDetector.close();
     await _controller?.dispose();
     _controller = null;
     _isInitialized = false;
   }
-}
-
-// ── Top-level function for compute isolate ────────────────
-Map<String, dynamic>? _analyzeFrame(Map<String, dynamic> data) {
-  try {
-    // Extract frame data
-    final width = data['width'] as int;
-    final height = data['height'] as int;
-    final planes = data['planes'] as List;
-
-    if (planes.isEmpty) return null;
-
-    final yPlane = planes[0];
-    final yBytes = yPlane['bytes'] as Uint8List;
-
-    // Simple brightness-based hand detection mock
-    // In production: replace with actual TFLite inference
-    return _mockGestureDetection(yBytes, width, height);
-  } catch (e) {
-    return null;
-  }
-}
-
-// ── Mock gesture logic (replace with TFLite) ─────────────
-Map<String, dynamic> _mockGestureDetection(
-    Uint8List bytes, int width, int height) {
-  // Analyze pixel brightness in center region
-  // This is a placeholder — real model goes here
-  int centerBrightness = 0;
-  int count = 0;
-
-  final centerX = width ~/ 2;
-  final centerY = height ~/ 2;
-  final regionSize = min(width, height) ~/ 4;
-
-  for (int y = centerY - regionSize; y < centerY + regionSize; y++) {
-    for (int x = centerX - regionSize; x < centerX + regionSize; x++) {
-      if (x >= 0 && x < width && y >= 0 && y < height) {
-        centerBrightness += bytes[y * width + x];
-        count++;
-      }
-    }
-  }
-
-  // Just return None for mock — buttons handle gestures
-  return {'gesture': 'None', 'confidence': 0.0};
 }

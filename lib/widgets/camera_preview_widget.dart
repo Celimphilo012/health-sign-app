@@ -10,7 +10,7 @@ class CameraPreviewWidget extends StatefulWidget {
   const CameraPreviewWidget({
     super.key,
     this.onGestureDetected,
-    this.autoDetect = false, // Manual mode by default for demo
+    this.autoDetect = true, // Manual mode by default for demo
   });
 
   @override
@@ -62,6 +62,28 @@ class _CameraPreviewWidgetState extends State<CameraPreviewWidget>
       if (widget.autoDetect) {
         _startDetection();
       }
+      // ── Gesture guide ─────────────────────────────────────
+      Positioned(
+        bottom: 50,
+        left: 0,
+        right: 0,
+        child: Center(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.5),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Text(
+              'Hold gesture steady for 1 second',
+              style: TextStyle(
+                color: Colors.white70,
+                fontSize: 10,
+              ),
+            ),
+          ),
+        ),
+      );
     }
   }
 

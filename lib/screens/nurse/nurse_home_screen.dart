@@ -1,9 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../providers/auth_provider.dart' as app_auth;
+import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
+import '../../providers/auth_provider.dart';
 import '../../providers/conversation_provider.dart';
+import '../../providers/chat_request_provider.dart';
 import '../../models/message_model.dart';
+import '../../models/user_model.dart';
 import '../../widgets/message_bubble.dart';
+import '../shared/nurse_chat_history_screen.dart';
+import '../../services/haptic_service.dart';
 
 class NurseHomeScreen extends StatefulWidget {
   const NurseHomeScreen({super.key});
@@ -13,7 +18,7 @@ class NurseHomeScreen extends StatefulWidget {
 }
 
 class _NurseHomeScreenState extends State<NurseHomeScreen> {
-  final _textCtrl = TextEditingController();
+  int _currentIndex = 0;
   bool _initialized = false;
 
   @override
@@ -21,12 +26,149 @@ class _NurseHomeScreenState extends State<NurseHomeScreen> {
     super.didChangeDependencies();
     if (!_initialized) {
       _initialized = true;
-      final user = context.read<app_auth.AuthProvider>().user;
+      final user = context.read<AuthProvider>().user;
       if (user != null) {
-        context.read<ConversationProvider>().initialize(user.uid);
+        final chatProvider = context.read<ChatRequestProvider>();
+        chatProvider.loadPatients();
+        // ✅ FIX #1 & #3: Start real-time stream for nurse active chat
+        chatProvider.listenForAcceptedRequest(user.uid);
       }
     }
   }
+
+  @override
+  Widget build(BuildContext context) {
+    final user = context.watch<AuthProvider>().user;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0D1117),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: [
+          _NurseChatTab(user: user),
+          _NursePatientsTab(user: user),
+        ],
+      ),
+      bottomNavigationBar: _AnimatedBottomNav(
+        currentIndex: _currentIndex,
+        onTap: (i) => setState(() => _currentIndex = i),
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// ANIMATED BOTTOM NAV
+// ══════════════════════════════════════════════════════════
+class _AnimatedBottomNav extends StatelessWidget {
+  final int currentIndex;
+  final Function(int) onTap;
+
+  const _AnimatedBottomNav({
+    required this.currentIndex,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final items = [
+      {
+        'icon': Icons.chat_bubble_outline,
+        'activeIcon': Icons.chat_bubble,
+        'label': 'Chat'
+      },
+      {
+        'icon': Icons.people_outline,
+        'activeIcon': Icons.people,
+        'label': 'Patients'
+      },
+    ];
+
+    return Container(
+      decoration: const BoxDecoration(
+        color: Color(0xFF161B22),
+        border: Border(top: BorderSide(color: Color(0xFF30363D))),
+      ),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: List.generate(items.length, (i) {
+              final isActive = currentIndex == i;
+              final item = items[i];
+              return GestureDetector(
+                onTap: () => onTap(i),
+                behavior: HitTestBehavior.opaque,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeOutBack,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isActive
+                        ? const Color(0xFF3FB950).withOpacity(0.15)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    children: [
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 200),
+                        child: Icon(
+                          isActive
+                              ? item['activeIcon'] as IconData
+                              : item['icon'] as IconData,
+                          key: ValueKey(isActive),
+                          color: isActive
+                              ? const Color(0xFF3FB950)
+                              : const Color(0xFF8B949E),
+                          size: 22,
+                        ),
+                      ),
+                      AnimatedSize(
+                        duration: const Duration(milliseconds: 250),
+                        curve: Curves.easeOutBack,
+                        child: isActive
+                            ? Padding(
+                                padding: const EdgeInsets.only(left: 8),
+                                child: Text(
+                                  item['label'] as String,
+                                  style: const TextStyle(
+                                    color: Color(0xFF3FB950),
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              )
+                            : const SizedBox.shrink(),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// TAB 1: CHAT
+// ══════════════════════════════════════════════════════════
+class _NurseChatTab extends StatefulWidget {
+  final UserModel? user;
+  const _NurseChatTab({this.user});
+
+  @override
+  State<_NurseChatTab> createState() => _NurseChatTabState();
+}
+
+class _NurseChatTabState extends State<_NurseChatTab> {
+  final _textCtrl = TextEditingController();
+  String? _lastConvId;
 
   @override
   void dispose() {
@@ -34,13 +176,27 @@ class _NurseHomeScreenState extends State<NurseHomeScreen> {
     super.dispose();
   }
 
+  // ✅ FIX #3: Auto-init conversation when nurse gets active chat
+  void _maybeInitConversation(String? convId) {
+    if (convId != null && convId.isNotEmpty && convId != _lastConvId) {
+      _lastConvId = convId;
+
+      HapticService.requestAccepted();
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          context.read<ConversationProvider>().initWithConversationId(convId);
+        }
+      });
+    }
+  }
+
   Future<void> _sendMessage(String text, MessageType type) async {
     if (text.trim().isEmpty) return;
-    final user = context.read<app_auth.AuthProvider>().user;
     final conv = context.read<ConversationProvider>();
     await conv.sendMessage(
       text: text,
-      senderId: user!.uid,
+      senderId: widget.user!.uid,
       senderRole: MessageSender.nurse,
       type: type,
     );
@@ -52,7 +208,6 @@ class _NurseHomeScreenState extends State<NurseHomeScreen> {
     final conv = context.read<ConversationProvider>();
     if (conv.isListening) {
       await conv.stopListening();
-      // Auto-send what was heard
       if (conv.liveText.isNotEmpty) {
         await _sendMessage(conv.liveText, MessageType.speech);
       }
@@ -61,68 +216,139 @@ class _NurseHomeScreenState extends State<NurseHomeScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final user = context.watch<app_auth.AuthProvider>().user;
-    final conv = context.watch<ConversationProvider>();
-
-    return Scaffold(
-      backgroundColor: const Color(0xFF0D1117),
-      appBar: AppBar(
+  // ✅ FIX #4: End conversation properly clears state
+  Future<void> _endConversation() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
         backgroundColor: const Color(0xFF161B22),
-        title: Row(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: const Color(0xFF3FB950).withOpacity(0.15),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.medical_services_outlined,
-                  color: Color(0xFF3FB950), size: 20),
-            ),
-            const SizedBox(width: 10),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  user?.name ?? 'Nurse',
-                  style: const TextStyle(
-                      color: Color(0xFFE6EDF3),
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600),
-                ),
-                const Text(
-                  'Nurse Mode',
-                  style: TextStyle(color: Color(0xFF3FB950), fontSize: 11),
-                ),
-              ],
-            ),
-          ],
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Color(0xFF30363D)),
+        ),
+        title: const Text(
+          'End Conversation',
+          style: TextStyle(color: Color(0xFFE6EDF3)),
+        ),
+        content: const Text(
+          'Are you sure you want to end this conversation?',
+          style: TextStyle(color: Color(0xFF8B949E)),
         ),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.logout, color: Color(0xFF8B949E)),
-            onPressed: () async {
-              await context.read<app_auth.AuthProvider>().logout();
-              if (mounted) {
-                Navigator.pushReplacementNamed(context, '/login');
-              }
-            },
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel',
+                style: TextStyle(color: Color(0xFF8B949E))),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFCF6679),
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+            child: const Text('End'),
           ),
         ],
       ),
+    );
+
+    if (confirm == true && mounted) {
+      // ✅ Clear messages + end convo in Firestore
+      context.read<ConversationProvider>().clearMessages();
+      await context.read<ChatRequestProvider>().endConversation();
+      _lastConvId = null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final chatProvider = context.watch<ChatRequestProvider>();
+    final activeRequest = chatProvider.activeRequest;
+    final conv = context.watch<ConversationProvider>();
+
+    // ✅ FIX #3: Auto-init conversation stream when active request arrives
+    if (activeRequest != null) {
+      _maybeInitConversation(activeRequest.conversationId);
+    }
+
+    // No active chat — show empty state
+    if (activeRequest == null) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF0D1117),
+        appBar: _buildAppBar(context, null),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF3FB950).withOpacity(0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.chat_bubble_outline,
+                    color: Color(0xFF3FB950), size: 36),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'No active conversation',
+                style: TextStyle(
+                  color: Color(0xFFE6EDF3),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Go to Patients tab to start a conversation',
+                style: TextStyle(color: Color(0xFF8B949E), fontSize: 13),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 28),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF3FB950).withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                      color: const Color(0xFF3FB950).withOpacity(0.3)),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.arrow_downward,
+                        color: Color(0xFF3FB950), size: 16),
+                    SizedBox(width: 6),
+                    Text(
+                      'Tap Patients below',
+                      style: TextStyle(color: Color(0xFF3FB950), fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Active chat
+    return Scaffold(
+      backgroundColor: const Color(0xFF0D1117),
+      appBar: _buildAppBar(context, activeRequest.patientName),
       body: Column(
         children: [
-          // ── STT Panel ───────────────────────────────
           _SttPanel(
             isListening: conv.isListening,
             liveText: conv.liveText,
             onToggle: _toggleListening,
           ),
-
-          // ── Message List ─────────────────────────────
           Expanded(
             child: conv.messages.isEmpty
                 ? const _EmptyChat()
@@ -140,8 +366,6 @@ class _NurseHomeScreenState extends State<NurseHomeScreen> {
                     },
                   ),
           ),
-
-          // ── Text Input Bar ───────────────────────────
           _NurseInputBar(
             controller: _textCtrl,
             isListening: conv.isListening,
@@ -156,6 +380,378 @@ class _NurseHomeScreenState extends State<NurseHomeScreen> {
       ),
     );
   }
+
+  AppBar _buildAppBar(BuildContext context, String? patientName) {
+    return AppBar(
+      backgroundColor: const Color(0xFF161B22),
+      automaticallyImplyLeading: false,
+      title: Row(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: const Color(0xFF3FB950).withOpacity(0.15),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.medical_services_outlined,
+                color: Color(0xFF3FB950), size: 20),
+          ),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                widget.user?.name ?? 'Nurse',
+                style: const TextStyle(
+                    color: Color(0xFFE6EDF3),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w600),
+              ),
+              if (patientName != null)
+                Row(
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF58A6FF),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Patient: $patientName',
+                      style: const TextStyle(
+                          color: Color(0xFF58A6FF), fontSize: 11),
+                    ),
+                  ],
+                )
+              else
+                const Text('Nurse Mode',
+                    style: TextStyle(color: Color(0xFF3FB950), fontSize: 11)),
+            ],
+          ),
+        ],
+      ),
+      actions: [
+        // ✅ FIX #5: History button
+        IconButton(
+          icon: const Icon(Icons.history, color: Color(0xFF8B949E), size: 20),
+          tooltip: 'Chat History',
+          onPressed: () => Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => const NurseChatHistoryScreen(),
+            ),
+          ),
+        ),
+        // End conversation button (only when active)
+        if (patientName != null)
+          TextButton.icon(
+            onPressed: _endConversation,
+            icon:
+                const Icon(Icons.call_end, color: Color(0xFFCF6679), size: 16),
+            label: const Text('End',
+                style: TextStyle(color: Color(0xFFCF6679), fontSize: 12)),
+          ),
+        IconButton(
+          icon: const Icon(Icons.logout, color: Color(0xFF8B949E), size: 20),
+          onPressed: () async {
+            context.read<ConversationProvider>().clearMessages();
+            await context.read<AuthProvider>().logout();
+            if (context.mounted) {
+              Navigator.pushReplacementNamed(context, '/login');
+            }
+          },
+        ),
+      ],
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════
+// TAB 2: PATIENTS
+// ══════════════════════════════════════════════════════════
+class _NursePatientsTab extends StatefulWidget {
+  final UserModel? user;
+  const _NursePatientsTab({this.user});
+
+  @override
+  State<_NursePatientsTab> createState() => _NursePatientsTabState();
+}
+
+class _NursePatientsTabState extends State<_NursePatientsTab> {
+  final _searchCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final provider = context.watch<ChatRequestProvider>();
+
+    return Scaffold(
+      backgroundColor: const Color(0xFF0D1117),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF161B22),
+        automaticallyImplyLeading: false,
+        title: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: const Color(0xFF3FB950).withOpacity(0.15),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child:
+                  const Icon(Icons.people, color: Color(0xFF3FB950), size: 20),
+            ),
+            const SizedBox(width: 10),
+            const Text(
+              'Patients',
+              style: TextStyle(
+                  color: Color(0xFFE6EDF3),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Color(0xFF8B949E), size: 20),
+            onPressed: () {
+              provider.loadPatients();
+            },
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          // Search bar
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: TextField(
+              controller: _searchCtrl,
+              style: const TextStyle(color: Color(0xFFE6EDF3)),
+              onChanged: provider.searchPatients,
+              decoration: InputDecoration(
+                hintText: 'Search patients by name...',
+                hintStyle: const TextStyle(color: Color(0xFF8B949E)),
+                prefixIcon: const Icon(Icons.search,
+                    color: Color(0xFF8B949E), size: 20),
+                suffixIcon: _searchCtrl.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear,
+                            color: Color(0xFF8B949E), size: 18),
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          provider.clearSearch();
+                        },
+                      )
+                    : null,
+                filled: true,
+                fillColor: const Color(0xFF21262D),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ),
+
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                const Icon(Icons.people_outline,
+                    size: 14, color: Color(0xFF8B949E)),
+                const SizedBox(width: 6),
+                Text(
+                  '${provider.filteredPatients.length} patient(s) registered',
+                  style:
+                      const TextStyle(color: Color(0xFF8B949E), fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+
+          Expanded(
+            child: provider.isLoading
+                ? const Center(
+                    child: CircularProgressIndicator(
+                      color: Color(0xFF3FB950),
+                      strokeWidth: 2,
+                    ),
+                  )
+                : provider.filteredPatients.isEmpty
+                    ? const _EmptyPatients()
+                    : ListView.builder(
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        itemCount: provider.filteredPatients.length,
+                        itemBuilder: (_, i) {
+                          final patient = provider.filteredPatients[i];
+                          return _PatientCard(
+                            patient: patient,
+                            onRequest: () async {
+                              if (widget.user == null) return;
+                              final success = await provider.sendRequest(
+                                nurse: widget.user!,
+                                patient: patient,
+                              );
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      success
+                                          ? '✓ Request sent to ${patient.name}'
+                                          : 'Failed to send request',
+                                    ),
+                                    backgroundColor: success
+                                        ? const Color(0xFF3FB950)
+                                        : const Color(0xFFCF6679),
+                                    behavior: SnackBarBehavior.floating,
+                                    margin: const EdgeInsets.all(12),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(10),
+                                    ),
+                                  ),
+                                );
+                              }
+                            },
+                          );
+                        },
+                      ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PatientCard extends StatelessWidget {
+  final UserModel patient;
+  final VoidCallback onRequest;
+
+  const _PatientCard({
+    required this.patient,
+    required this.onRequest,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161B22),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF30363D)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 46,
+            height: 46,
+            decoration: BoxDecoration(
+              color: const Color(0xFF58A6FF).withOpacity(0.15),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                patient.name.isNotEmpty ? patient.name[0].toUpperCase() : 'P',
+                style: const TextStyle(
+                  color: Color(0xFF58A6FF),
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  patient.name,
+                  style: const TextStyle(
+                    color: Color(0xFFE6EDF3),
+                    fontWeight: FontWeight.w600,
+                    fontSize: 14,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  patient.email,
+                  style: const TextStyle(
+                    color: Color(0xFF8B949E),
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF58A6FF).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: const Text(
+                    'Patient',
+                    style: TextStyle(
+                        color: Color(0xFF58A6FF),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w500),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          ElevatedButton.icon(
+            onPressed: onRequest,
+            icon: const Icon(Icons.chat_bubble_outline, size: 14),
+            label: const Text('Chat', style: TextStyle(fontSize: 12)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF3FB950),
+              foregroundColor: Colors.black,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
+              elevation: 0,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyPatients extends StatelessWidget {
+  const _EmptyPatients();
+  @override
+  Widget build(BuildContext context) {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.people_outline, size: 52, color: Color(0xFF30363D)),
+          SizedBox(height: 12),
+          Text('No patients found',
+              style: TextStyle(color: Color(0xFF8B949E), fontSize: 15)),
+          SizedBox(height: 6),
+          Text('Patients appear here once they register',
+              style: TextStyle(color: Color(0xFF8B949E), fontSize: 12)),
+        ],
+      ),
+    );
+  }
 }
 
 // ── STT Panel ─────────────────────────────────────────────
@@ -163,7 +759,6 @@ class _SttPanel extends StatelessWidget {
   final bool isListening;
   final String liveText;
   final VoidCallback onToggle;
-
   const _SttPanel({
     required this.isListening,
     required this.liveText,
@@ -174,10 +769,10 @@ class _SttPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.all(12),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: const Color(0xFF161B22),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
           color: isListening
               ? const Color(0xFF3FB950).withOpacity(0.5)
@@ -189,13 +784,12 @@ class _SttPanel extends StatelessWidget {
         children: [
           Row(
             children: [
-              // Mic button
               GestureDetector(
                 onTap: onToggle,
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
-                  width: 60,
-                  height: 60,
+                  width: 54,
+                  height: 54,
                   decoration: BoxDecoration(
                     color: isListening
                         ? const Color(0xFF3FB950).withOpacity(0.2)
@@ -213,11 +807,11 @@ class _SttPanel extends StatelessWidget {
                     color: isListening
                         ? const Color(0xFF3FB950)
                         : const Color(0xFF8B949E),
-                    size: 28,
+                    size: 26,
                   ),
                 ),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -232,40 +826,29 @@ class _SttPanel extends StatelessWidget {
                         fontWeight: FontWeight.w600,
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      isListening
-                          ? 'Speak clearly — tap again to send'
-                          : 'Voice will be converted to text',
-                      style: const TextStyle(
-                        color: Color(0xFF8B949E),
-                        fontSize: 11,
-                      ),
+                    const Text(
+                      'Voice → text → send to patient',
+                      style: TextStyle(color: Color(0xFF8B949E), fontSize: 11),
                     ),
                   ],
                 ),
               ),
-              // Pulse indicator
               if (isListening) _PulsingDot(),
             ],
           ),
-          // Live transcript
           if (liveText.isNotEmpty) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
                 color: const Color(0xFF0D1117),
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: const Color(0xFF30363D)),
               ),
               child: Text(
                 liveText,
-                style: const TextStyle(
-                  color: Color(0xFFE6EDF3),
-                  fontSize: 15,
-                ),
+                style: const TextStyle(color: Color(0xFFE6EDF3), fontSize: 14),
               ),
             ),
           ],
@@ -275,7 +858,6 @@ class _SttPanel extends StatelessWidget {
   }
 }
 
-// ── Pulsing dot for listening indicator ──────────────────
 class _PulsingDot extends StatefulWidget {
   @override
   State<_PulsingDot> createState() => _PulsingDotState();
@@ -285,14 +867,13 @@ class _PulsingDotState extends State<_PulsingDot>
     with SingleTickerProviderStateMixin {
   late AnimationController _ctrl;
   late Animation<double> _anim;
-
   @override
   void initState() {
     super.initState();
     _ctrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 800))
+        vsync: this, duration: const Duration(milliseconds: 700))
       ..repeat(reverse: true);
-    _anim = Tween<double>(begin: 0.4, end: 1.0).animate(_ctrl);
+    _anim = Tween<double>(begin: 0.3, end: 1.0).animate(_ctrl);
   }
 
   @override
@@ -306,8 +887,8 @@ class _PulsingDotState extends State<_PulsingDot>
     return FadeTransition(
       opacity: _anim,
       child: Container(
-        width: 12,
-        height: 12,
+        width: 10,
+        height: 10,
         decoration: const BoxDecoration(
           color: Color(0xFF3FB950),
           shape: BoxShape.circle,
@@ -317,7 +898,6 @@ class _PulsingDotState extends State<_PulsingDot>
   }
 }
 
-// ── Nurse Input Bar ───────────────────────────────────────
 class _NurseInputBar extends StatelessWidget {
   final TextEditingController controller;
   final bool isListening;
@@ -349,7 +929,6 @@ class _NurseInputBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // Mic toggle
           GestureDetector(
             onTap: onToggleMic,
             child: Container(
@@ -376,7 +955,6 @@ class _NurseInputBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          // Text field
           Expanded(
             child: TextField(
               controller: controller,
@@ -396,8 +974,7 @@ class _NurseInputBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          // Speak live text button
-          if (liveText.isNotEmpty)
+          if (liveText.isNotEmpty) ...[
             GestureDetector(
               onTap: isSpeaking ? onStop : onSpeakLive,
               child: Container(
@@ -418,8 +995,8 @@ class _NurseInputBar extends StatelessWidget {
                 ),
               ),
             ),
-          if (liveText.isNotEmpty) const SizedBox(width: 6),
-          // Send button
+            const SizedBox(width: 6),
+          ],
           GestureDetector(
             onTap: onSend,
             child: Container(
@@ -441,10 +1018,8 @@ class _NurseInputBar extends StatelessWidget {
   }
 }
 
-// ── Empty chat ────────────────────────────────────────────
 class _EmptyChat extends StatelessWidget {
   const _EmptyChat();
-
   @override
   Widget build(BuildContext context) {
     return const Center(

@@ -28,13 +28,13 @@ class MessageModel {
   String get typeLabel {
     switch (type) {
       case MessageType.gesture:
-        return '🤟 Sign Language';
+        return 'Sign Language';
       case MessageType.speech:
-        return '🎤 Voice';
+        return 'Voice';
       case MessageType.shortcut:
-        return '⚡ Quick';
+        return 'Quick';
       default:
-        return '💬 Text';
+        return 'Text';
     }
   }
 

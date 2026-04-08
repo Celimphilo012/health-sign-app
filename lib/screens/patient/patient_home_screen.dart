@@ -1,11 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../../providers/auth_provider.dart' as app_auth;
+import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
+import '../../providers/auth_provider.dart';
 import '../../providers/conversation_provider.dart';
+import '../../providers/chat_request_provider.dart';
 import '../../models/message_model.dart';
+import '../../models/chat_request_model.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/camera_preview_widget.dart';
-import '../../services/permission_service.dart';
+import '../../services/haptic_service.dart';
 
 class PatientHomeScreen extends StatefulWidget {
   const PatientHomeScreen({super.key});
@@ -15,10 +18,11 @@ class PatientHomeScreen extends StatefulWidget {
 }
 
 class _PatientHomeScreenState extends State<PatientHomeScreen> {
+  int _lastMessageCount = 0;
   final _textCtrl = TextEditingController();
   bool _initialized = false;
+  bool _isShowingDialog = false;
 
-  // Mock gesture list — replace with real ML later
   final List<Map<String, String>> _gestures = [
     {'gesture': 'thumbs_up', 'label': '👍', 'text': 'Yes / I agree'},
     {'gesture': 'thumbs_down', 'label': '👎', 'text': 'No / I disagree'},
@@ -44,9 +48,15 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     super.didChangeDependencies();
     if (!_initialized) {
       _initialized = true;
-      final user = context.read<app_auth.AuthProvider>().user;
+      final user = context.read<AuthProvider>().user;
       if (user != null) {
-        context.read<ConversationProvider>().initialize(user.uid);
+        // Init conversation
+        context.read<ConversationProvider>().initialize(
+              user.uid,
+              role: 'patient',
+            );
+        // ✅ FIX #1: Start REAL-TIME stream for incoming requests
+        context.read<ChatRequestProvider>().listenForRequests(user.uid);
       }
     }
   }
@@ -59,7 +69,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
 
   Future<void> _sendMessage(String text, MessageType type) async {
     if (text.trim().isEmpty) return;
-    final user = context.read<app_auth.AuthProvider>().user;
+    final user = context.read<AuthProvider>().user;
     final conv = context.read<ConversationProvider>();
     await conv.sendMessage(
       text: text,
@@ -77,10 +87,222 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     _sendMessage(gesture['text']!, MessageType.gesture);
   }
 
+  // ✅ FIX #1: Real-time popup shown when request arrives
+  void _showIncomingRequest(ChatRequestModel request) {
+    if (_isShowingDialog) return;
+    _isShowingDialog = true;
+
+    HapticService.incomingRequest();
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => WillPopScope(
+        onWillPop: () async => false,
+        child: AlertDialog(
+          backgroundColor: const Color(0xFF161B22),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: const BorderSide(color: Color(0xFF3FB950), width: 2),
+          ),
+          title: Column(
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF3FB950).withOpacity(0.15),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: const Color(0xFF3FB950).withOpacity(0.4),
+                      width: 2),
+                ),
+                child: const Icon(
+                  Icons.medical_services_outlined,
+                  color: Color(0xFF3FB950),
+                  size: 32,
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'Incoming Chat Request',
+                style: TextStyle(
+                  color: Color(0xFFE6EDF3),
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF21262D),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF30363D)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF3FB950).withOpacity(0.15),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child: Text(
+                          request.nurseName.isNotEmpty
+                              ? request.nurseName[0].toUpperCase()
+                              : 'N',
+                          style: const TextStyle(
+                            color: Color(0xFF3FB950),
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            request.nurseName,
+                            style: const TextStyle(
+                              color: Color(0xFFE6EDF3),
+                              fontWeight: FontWeight.w600,
+                              fontSize: 15,
+                            ),
+                          ),
+                          const Text(
+                            'Healthcare Worker',
+                            style: TextStyle(
+                              color: Color(0xFF3FB950),
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                'wants to start a conversation with you',
+                style: TextStyle(
+                  color: Color(0xFF8B949E),
+                  fontSize: 13,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+          actionsAlignment: MainAxisAlignment.spaceEvenly,
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          actions: [
+            OutlinedButton.icon(
+              onPressed: () async {
+                Navigator.pop(context);
+                _isShowingDialog = false;
+
+                HapticService.requestDeclined();
+
+                await context
+                    .read<ChatRequestProvider>()
+                    .declineRequest(request.id);
+              },
+              icon: const Icon(Icons.close, color: Color(0xFFCF6679), size: 16),
+              label: const Text('Decline',
+                  style: TextStyle(color: Color(0xFFCF6679))),
+              style: OutlinedButton.styleFrom(
+                side: const BorderSide(color: Color(0xFFCF6679)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+              ),
+            ),
+            ElevatedButton.icon(
+              onPressed: () async {
+                Navigator.pop(context);
+                _isShowingDialog = false;
+                HapticService.requestAccepted();
+                final convId = await context
+                    .read<ChatRequestProvider>()
+                    .acceptRequest(request.id, request.patientId);
+                if (convId != null && context.mounted) {
+                  // Init conversation with the accepted convId
+                  await context
+                      .read<ConversationProvider>()
+                      .initWithConversationId(convId);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('✓ Connected with ${request.nurseName}!'),
+                      backgroundColor: const Color(0xFF3FB950),
+                      behavior: SnackBarBehavior.floating,
+                      margin: const EdgeInsets.all(12),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  );
+                }
+              },
+              icon: const Icon(Icons.check, size: 16),
+              label: const Text('Accept'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF3FB950),
+                foregroundColor: Colors.black,
+                elevation: 0,
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ).then((_) => _isShowingDialog = false);
+  }
+
   @override
   Widget build(BuildContext context) {
-    final user = context.watch<app_auth.AuthProvider>().user;
+    final user = context.watch<AuthProvider>().user;
     final conv = context.watch<ConversationProvider>();
+    // ✅ Vibrate when nurse sends a new message
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (conv.messages.length > _lastMessageCount) {
+        final newMessages = conv.messages.skip(_lastMessageCount).toList();
+        // Only vibrate if the new message is from nurse (not self)
+        final hasNurseMessage = newMessages.any(
+          (m) => m.senderRole == MessageSender.nurse,
+        );
+        if (hasNurseMessage && _lastMessageCount > 0) {
+          HapticService.newMessage();
+        }
+        _lastMessageCount = conv.messages.length;
+      }
+    });
+    final requests = context.watch<ChatRequestProvider>().incomingRequests;
+
+    // ✅ FIX #1: Show popup when request arrives in real-time
+    if (requests.isNotEmpty && !_isShowingDialog) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (requests.isNotEmpty && !_isShowingDialog && mounted) {
+          _showIncomingRequest(requests.first);
+        }
+      });
+    }
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D1117),
@@ -109,51 +331,44 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
                       fontSize: 15,
                       fontWeight: FontWeight.w600),
                 ),
-                const Text(
-                  'Patient Mode',
-                  style: TextStyle(color: Color(0xFF58A6FF), fontSize: 11),
-                ),
+                const Text('Patient Mode',
+                    style: TextStyle(color: Color(0xFF58A6FF), fontSize: 11)),
               ],
             ),
           ],
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.history, color: Color(0xFF8B949E)),
+            icon: const Icon(Icons.sign_language,
+                color: Color(0xFF8B949E), size: 20),
+            onPressed: () => Navigator.pushNamed(context, '/gesture-demo'),
+          ),
+          IconButton(
+            icon: const Icon(Icons.history, color: Color(0xFF8B949E), size: 20),
             onPressed: () => Navigator.pushNamed(context, '/history'),
           ),
           IconButton(
-            icon: const Icon(Icons.logout, color: Color(0xFF8B949E)),
+            icon: const Icon(Icons.logout, color: Color(0xFF8B949E), size: 20),
             onPressed: () async {
-              await context.read<app_auth.AuthProvider>().logout();
+              await context.read<AuthProvider>().logout();
               if (mounted) {
                 Navigator.pushReplacementNamed(context, '/login');
               }
             },
           ),
-          IconButton(
-            icon: const Icon(Icons.sign_language, color: Color(0xFF8B949E)),
-            tooltip: 'Gesture Reference',
-            onPressed: () => Navigator.pushNamed(context, '/gesture-demo'),
-          ),
         ],
       ),
       body: Column(
         children: [
-          // ── Gesture Camera Panel ─────────────────────
           _GestureCameraPanel(
             detectedGesture: conv.detectedGesture,
             gestures: _gestures,
             onGestureSelected: _simulateGesture,
           ),
-
-          // ── Quick Shortcuts ──────────────────────────
           _ShortcutBar(
             shortcuts: _shortcuts,
             onSelected: (text) => _sendMessage(text, MessageType.shortcut),
           ),
-
-          // ── Message List ─────────────────────────────
           Expanded(
             child: conv.messages.isEmpty
                 ? const _EmptyChat()
@@ -171,8 +386,6 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
                     },
                   ),
           ),
-
-          // ── Text Input ───────────────────────────────
           _TextInputBar(
             controller: _textCtrl,
             isSpeaking: conv.isSpeaking,
@@ -209,17 +422,14 @@ class _GestureCameraPanel extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // Camera placeholder + detected gesture
           Container(
             height: 140,
-            decoration: BoxDecoration(
-              color: const Color(0xFF0D1117),
-              borderRadius:
-                  const BorderRadius.vertical(top: Radius.circular(16)),
+            decoration: const BoxDecoration(
+              color: Color(0xFF0D1117),
+              borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
             ),
             child: Row(
               children: [
-                // Camera preview
                 Expanded(
                   flex: 2,
                   child: Container(
@@ -235,7 +445,6 @@ class _GestureCameraPanel extends StatelessWidget {
                     ),
                   ),
                 ),
-                // Detected gesture display
                 Expanded(
                   flex: 1,
                   child: Column(
@@ -262,14 +471,13 @@ class _GestureCameraPanel extends StatelessWidget {
               ],
             ),
           ),
-          // Gesture buttons row
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Padding(
-                  padding: EdgeInsets.only(bottom: 8),
+                  padding: EdgeInsets.only(bottom: 8, top: 8),
                   child: Text(
                     'Tap a gesture to send:',
                     style: TextStyle(color: Color(0xFF8B949E), fontSize: 11),
@@ -395,21 +603,48 @@ class _TextInputBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          // Speak button
-          _IconBtn(
-            icon: isSpeaking
-                ? Icons.stop_circle_outlined
-                : Icons.volume_up_outlined,
-            color:
-                isSpeaking ? const Color(0xFFCF6679) : const Color(0xFF8B949E),
+          GestureDetector(
             onTap: isSpeaking ? onStop : onSpeak,
+            child: Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: isSpeaking
+                    ? const Color(0xFFCF6679).withOpacity(0.15)
+                    : const Color(0xFF8B949E).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isSpeaking
+                      ? const Color(0xFFCF6679).withOpacity(0.4)
+                      : const Color(0xFF30363D),
+                ),
+              ),
+              child: Icon(
+                isSpeaking
+                    ? Icons.stop_circle_outlined
+                    : Icons.volume_up_outlined,
+                color: isSpeaking
+                    ? const Color(0xFFCF6679)
+                    : const Color(0xFF8B949E),
+                size: 20,
+              ),
+            ),
           ),
           const SizedBox(width: 6),
-          // Send button
-          _IconBtn(
-            icon: Icons.send_rounded,
-            color: const Color(0xFF00BFA5),
+          GestureDetector(
             onTap: onSend,
+            child: Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: const Color(0xFF00BFA5).withOpacity(0.15),
+                borderRadius: BorderRadius.circular(12),
+                border:
+                    Border.all(color: const Color(0xFF00BFA5).withOpacity(0.4)),
+              ),
+              child: const Icon(Icons.send_rounded,
+                  color: Color(0xFF00BFA5), size: 20),
+            ),
           ),
         ],
       ),
@@ -417,36 +652,8 @@ class _TextInputBar extends StatelessWidget {
   }
 }
 
-class _IconBtn extends StatelessWidget {
-  final IconData icon;
-  final Color color;
-  final VoidCallback onTap;
-
-  const _IconBtn(
-      {required this.icon, required this.color, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.15),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withOpacity(0.4)),
-        ),
-        child: Icon(icon, color: color, size: 20),
-      ),
-    );
-  }
-}
-
-// ── Empty chat placeholder ────────────────────────────────
 class _EmptyChat extends StatelessWidget {
   const _EmptyChat();
-
   @override
   Widget build(BuildContext context) {
     return const Center(
@@ -455,14 +662,10 @@ class _EmptyChat extends StatelessWidget {
         children: [
           Icon(Icons.chat_bubble_outline, size: 48, color: Color(0xFF30363D)),
           SizedBox(height: 12),
-          Text(
-            'No messages yet',
-            style: TextStyle(color: Color(0xFF8B949E), fontSize: 15),
-          ),
-          Text(
-            'Use gestures or shortcuts to communicate',
-            style: TextStyle(color: Color(0xFF8B949E), fontSize: 12),
-          ),
+          Text('No messages yet',
+              style: TextStyle(color: Color(0xFF8B949E), fontSize: 15)),
+          Text('Use gestures or shortcuts to communicate',
+              style: TextStyle(color: Color(0xFF8B949E), fontSize: 12)),
         ],
       ),
     );

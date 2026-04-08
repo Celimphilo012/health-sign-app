@@ -14,6 +14,7 @@ import 'screens/auth/register_screen.dart';
 import 'screens/patient/patient_home_screen.dart';
 import 'screens/nurse/nurse_home_screen.dart';
 import 'screens/shared/gesture_demo_screen.dart';
+import 'providers/chat_request_provider.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -52,6 +53,7 @@ class HealthSignApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => ConversationProvider()),
+        ChangeNotifierProvider(create: (_) => ChatRequestProvider()),
       ],
       child: MaterialApp(
         title: 'HealthSign',

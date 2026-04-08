@@ -3,8 +3,12 @@ import 'package:uuid/uuid.dart';
 import '../models/message_model.dart';
 import '../services/firestore_service.dart';
 import '../services/speech_service.dart';
+import '../models/user_model.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ConversationProvider extends ChangeNotifier {
+  UserModel? _chattingWith;
+  UserModel? get chattingWith => _chattingWith;
   final FirestoreService _firestoreService = FirestoreService();
   final SpeechService _speechService = SpeechService();
   final _uuid = const Uuid();
@@ -35,6 +39,8 @@ class ConversationProvider extends ChangeNotifier {
       notifyListeners();
     });
 
+    await loadChattingWith(userId, role);
+
     notifyListeners();
   }
 
@@ -59,6 +65,36 @@ class ConversationProvider extends ChangeNotifier {
 
     await _firestoreService.saveMessage(message);
     await _firestoreService.updateLastMessage(_conversationId, text.trim());
+  }
+
+  Future<void> loadChattingWith(
+      String currentUserId, String currentRole) async {
+    try {
+      final firestoreService = FirestoreService();
+      if (currentRole == 'patient') {
+        // Patient sees the first available nurse
+        final nurses = await firestoreService.getNurses();
+        if (nurses.isNotEmpty) {
+          _chattingWith = nurses.first;
+          notifyListeners();
+        }
+      } else {
+        // Nurse sees the patient of this conversation
+        final doc = await FirebaseFirestore.instance
+            .collection('conversations')
+            .doc(_conversationId)
+            .get();
+        if (doc.exists) {
+          final patientId = doc.data()?['patientId'] as String?;
+          if (patientId != null) {
+            _chattingWith = await firestoreService.getUserById(patientId);
+            notifyListeners();
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading chat partner: $e');
+    }
   }
 
   // ── TTS: speak text ───────────────────────────────────
