@@ -25,6 +25,11 @@ class GestureService {
     'Victory': 'I am okay',
     'Pointing_Up': 'I need attention',
     'None': '',
+    'Wave': 'Hello / Goodbye',
+    'Hand_on_chest': 'I have chest pain',
+    'Head_touch': 'I have a headache',
+    'Arms_crossed': 'I am cold',
+    'Hand_on_belly': 'I have stomach pain',
   };
 
   static const Map<String, String> gestureEmoji = {
@@ -35,6 +40,11 @@ class GestureService {
     'Victory': '✌️',
     'Pointing_Up': '☝️',
     'None': '🤚',
+    'Wave': '👋',
+    'Hand_on_chest': '💔',
+    'Head_touch': '🤕',
+    'Arms_crossed': '🥶',
+    'Hand_on_belly': '🤢',
   };
 
   Future<void> initCamera() async {
@@ -176,6 +186,55 @@ class GestureService {
         wrist.y > shoulder.y - 20 &&
         wrist.y < shoulder.y + 80) {
       return 'Closed_Fist';
+    }
+    // ✋ Open Palm: wrist above shoulder
+    if (shoulder != null && wrist.y < shoulder.y - 50) {
+      return 'Open_Palm';
+    }
+
+    // ── NEW HOSPITAL GESTURES ─────────────────────────────
+
+    // 👋 Wave: wrist moves rapidly side to side above shoulder
+    // (detect by wrist being high + x position varying)
+    if (shoulder != null &&
+        wrist.y < shoulder.y &&
+        wrist.x > 200 &&
+        wrist.x < 500) {
+      return 'Wave';
+    }
+
+    // 💔 Hand on chest: wrist very close to chest/shoulder level
+    // and close to body center (x near nose x)
+    if (nose != null &&
+        shoulder != null &&
+        (wrist.y - shoulder.y).abs() < 40 &&
+        (wrist.x - nose.x).abs() < 80) {
+      return 'Hand_on_chest';
+    }
+
+    // 🤕 Head touch: wrist is at or above head (above nose)
+    if (nose != null && wrist.y < nose.y - 40) {
+      return 'Head_touch';
+    }
+
+    // 🥶 Arms crossed: both wrists visible and crossing midpoint
+    final leftW = landmarks[PoseLandmarkType.leftWrist];
+    final rightW = landmarks[PoseLandmarkType.rightWrist];
+    if (leftW != null && rightW != null) {
+      final midX = (leftW.x + rightW.x) / 2;
+      // Left wrist is to the right of midpoint = arms crossed
+      if (leftW.x > midX + 30 && rightW.x < midX - 30) {
+        return 'Arms_crossed';
+      }
+    }
+
+    // 🤢 Hand on belly: wrist below shoulder and near center
+    if (shoulder != null &&
+        nose != null &&
+        wrist.y > shoulder.y + 60 &&
+        wrist.y < shoulder.y + 180 &&
+        (wrist.x - nose.x).abs() < 100) {
+      return 'Hand_on_belly';
     }
 
     return 'None';

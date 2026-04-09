@@ -24,6 +24,7 @@ class _NurseHomeScreenState extends State<NurseHomeScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+
     if (!_initialized) {
       _initialized = true;
       final user = context.read<AuthProvider>().user;
@@ -168,12 +169,39 @@ class _NurseChatTab extends StatefulWidget {
 
 class _NurseChatTabState extends State<_NurseChatTab> {
   final _textCtrl = TextEditingController();
+  final _scrollCtrl = ScrollController();
   String? _lastConvId;
+  int _lastMessageCount = 0;
+
+  // ✅ ADD didChangeDependencies here (inside _NurseChatTabState)
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Auto-send when user stops talking
+    context.read<ConversationProvider>().setOnSttStopped((text) {
+      if (mounted && text.trim().isNotEmpty) {
+        _sendMessage(text, MessageType.speech);
+      }
+    });
+  }
 
   @override
   void dispose() {
     _textCtrl.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollCtrl.hasClients) {
+        _scrollCtrl.animateTo(
+          _scrollCtrl.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   // ✅ FIX #3: Auto-init conversation when nurse gets active chat
@@ -206,10 +234,19 @@ class _NurseChatTabState extends State<_NurseChatTab> {
 
   Future<void> _toggleListening() async {
     final conv = context.read<ConversationProvider>();
+
     if (conv.isListening) {
+      // Stop listening first
       await conv.stopListening();
-      if (conv.liveText.isNotEmpty) {
-        await _sendMessage(conv.liveText, MessageType.speech);
+
+      // ✅ Small delay to let final words be captured
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // ✅ Read liveText AFTER stopping
+      final text = context.read<ConversationProvider>().liveText;
+
+      if (text.trim().isNotEmpty) {
+        await _sendMessage(text, MessageType.speech);
       }
     } else {
       await conv.startListening();
@@ -269,6 +306,14 @@ class _NurseChatTabState extends State<_NurseChatTab> {
     final chatProvider = context.watch<ChatRequestProvider>();
     final activeRequest = chatProvider.activeRequest;
     final conv = context.watch<ConversationProvider>();
+
+    // ✅ Auto-scroll on new message
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (conv.messages.length > _lastMessageCount) {
+        _lastMessageCount = conv.messages.length;
+        _scrollToBottom();
+      }
+    });
 
     // ✅ FIX #3: Auto-init conversation stream when active request arrives
     if (activeRequest != null) {
@@ -353,6 +398,7 @@ class _NurseChatTabState extends State<_NurseChatTab> {
             child: conv.messages.isEmpty
                 ? const _EmptyChat()
                 : ListView.builder(
+                    controller: _scrollCtrl,
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     itemCount: conv.messages.length,
                     itemBuilder: (_, i) {

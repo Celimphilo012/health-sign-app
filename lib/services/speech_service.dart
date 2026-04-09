@@ -64,6 +64,8 @@ class SpeechService {
     required Function(bool isListening) onListeningChanged,
   }) async {
     await _stt.stop();
+    // ✅ Small delay before signaling stopped
+    await Future.delayed(const Duration(milliseconds: 300));
     onListeningChanged(false);
   }
 

@@ -11,6 +11,7 @@ class ConversationProvider extends ChangeNotifier {
   final FirestoreService _firestoreService = FirestoreService();
   final SpeechService _speechService = SpeechService();
   final _uuid = const Uuid();
+  Function(String text)? _onSttStopped;
 
   StreamSubscription<List<MessageModel>>? _messagesSub;
 
@@ -36,8 +37,7 @@ class ConversationProvider extends ChangeNotifier {
     if (convId == _conversationId && convId.isNotEmpty) return;
     _conversationId = convId;
     _messagesSub?.cancel();
-    _messagesSub =
-        _firestoreService.getMessagesStream(convId).listen((msgs) {
+    _messagesSub = _firestoreService.getMessagesStream(convId).listen((msgs) {
       _messages = msgs;
       notifyListeners();
     });
@@ -45,13 +45,11 @@ class ConversationProvider extends ChangeNotifier {
   }
 
   // ── Initialize by userId (patient side) ───────────────
-  Future<void> initialize(String userId,
-      {String role = 'patient'}) async {
+  Future<void> initialize(String userId, {String role = 'patient'}) async {
     await _speechService.initTts();
     await _speechService.initStt();
 
-    final convId =
-        await _firestoreService.getOrCreateConversation(userId);
+    final convId = await _firestoreService.getOrCreateConversation(userId);
     await initWithConversationId(convId);
   }
 
@@ -75,8 +73,7 @@ class ConversationProvider extends ChangeNotifier {
     );
 
     await _firestoreService.saveMessage(message);
-    await _firestoreService.updateLastMessage(
-        _conversationId, text.trim());
+    await _firestoreService.updateLastMessage(_conversationId, text.trim());
   }
 
   // ── TTS ───────────────────────────────────────────────
@@ -103,6 +100,9 @@ class ConversationProvider extends ChangeNotifier {
       },
       onListeningChanged: (listening) {
         _isListening = listening;
+        if (!listening && _liveText.isNotEmpty) {
+          _onSttStopped?.call(_liveText);
+        }
         notifyListeners();
       },
     );
@@ -135,6 +135,10 @@ class ConversationProvider extends ChangeNotifier {
     _conversationId = '';
     _messagesSub?.cancel();
     notifyListeners();
+  }
+
+  void setOnSttStopped(Function(String text) callback) {
+    _onSttStopped = callback;
   }
 
   @override

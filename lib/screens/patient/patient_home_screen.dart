@@ -20,6 +20,7 @@ class PatientHomeScreen extends StatefulWidget {
 class _PatientHomeScreenState extends State<PatientHomeScreen> {
   int _lastMessageCount = 0;
   final _textCtrl = TextEditingController();
+  final _scrollCtrl = ScrollController(); // ✅ ADD THIS
   bool _initialized = false;
   bool _isShowingDialog = false;
 
@@ -30,6 +31,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     {'gesture': 'pointing', 'label': '☝️', 'text': 'I need attention'},
     {'gesture': 'fist', 'label': '✊', 'text': 'I am in pain'},
     {'gesture': 'peace', 'label': '✌️', 'text': 'I am okay'},
+    {'gesture': 'wave', 'label': '👋', 'text': 'Hello / Goodbye'},
   ];
 
   final List<Map<String, String>> _shortcuts = [
@@ -64,6 +66,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
   @override
   void dispose() {
     _textCtrl.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
   }
 
@@ -79,6 +82,18 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     );
     await conv.speakText(text);
     _textCtrl.clear();
+  }
+
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollCtrl.hasClients) {
+        _scrollCtrl.animateTo(
+          _scrollCtrl.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
   }
 
   void _simulateGesture(Map<String, String> gesture) {
@@ -291,6 +306,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
           HapticService.newMessage();
         }
         _lastMessageCount = conv.messages.length;
+        _scrollToBottom();
       }
     });
     final requests = context.watch<ChatRequestProvider>().incomingRequests;
@@ -373,6 +389,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
             child: conv.messages.isEmpty
                 ? const _EmptyChat()
                 : ListView.builder(
+                    controller: _scrollCtrl,
                     padding: const EdgeInsets.symmetric(vertical: 8),
                     itemCount: conv.messages.length,
                     itemBuilder: (_, i) {
