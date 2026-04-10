@@ -9,6 +9,11 @@ import '../../models/user_model.dart';
 import '../../widgets/message_bubble.dart';
 import '../shared/nurse_chat_history_screen.dart';
 import '../../services/haptic_service.dart';
+import 'package:salomon_bottom_bar/salomon_bottom_bar.dart';
+import '../../services/firestore_service.dart';
+import '../../models/chat_request_model.dart';
+import '../../services/notification_service.dart';
+import '../../services/location_service.dart';
 
 class NurseHomeScreen extends StatefulWidget {
   const NurseHomeScreen({super.key});
@@ -24,22 +29,34 @@ class _NurseHomeScreenState extends State<NurseHomeScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-
     if (!_initialized) {
       _initialized = true;
       final user = context.read<AuthProvider>().user;
       if (user != null) {
         final chatProvider = context.read<ChatRequestProvider>();
         chatProvider.loadPatients();
-        // ✅ FIX #1 & #3: Start real-time stream for nurse active chat
         chatProvider.listenForAcceptedRequest(user.uid);
+        chatProvider.listenForPatientCalls();
+        _saveNursePresence(user.uid);
       }
+    }
+  }
+
+  Future<void> _saveNursePresence(String nurseId) async {
+    final position = await LocationService().getCurrentPosition();
+    if (position != null) {
+      await NotificationService().saveNurseToken(
+        nurseId: nurseId,
+        latitude: position.latitude,
+        longitude: position.longitude,
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthProvider>().user;
+    final hasActiveChat = context.watch<ChatRequestProvider>().hasActiveChat;
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D1117),
@@ -50,9 +67,333 @@ class _NurseHomeScreenState extends State<NurseHomeScreen> {
           _NursePatientsTab(user: user),
         ],
       ),
-      bottomNavigationBar: _AnimatedBottomNav(
-        currentIndex: _currentIndex,
-        onTap: (i) => setState(() => _currentIndex = i),
+      bottomNavigationBar: Container(
+        decoration: const BoxDecoration(
+          color: Color(0xFF161B22),
+          border: Border(
+            top: BorderSide(color: Color(0xFF30363D)),
+          ),
+        ),
+        child: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: SalomonBottomBar(
+              currentIndex: _currentIndex,
+              onTap: (i) => setState(() => _currentIndex = i),
+              margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              items: [
+                SalomonBottomBarItem(
+                  icon: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      const Icon(Icons.chat_bubble_outline),
+                      // ✅ Notification dot when active chat
+                      if (hasActiveChat && _currentIndex != 0)
+                        Positioned(
+                          top: -2,
+                          right: -4,
+                          child: Container(
+                            width: 8,
+                            height: 8,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFFCF6679),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  activeIcon: const Icon(Icons.chat_bubble),
+                  title: const Text('Chat'),
+                  selectedColor: const Color(0xFF3FB950),
+                  unselectedColor: const Color(0xFF8B949E),
+                ),
+                SalomonBottomBarItem(
+                  icon: const Icon(Icons.people_outline),
+                  activeIcon: const Icon(Icons.people),
+                  title: const Text('Patients'),
+                  selectedColor: const Color(0xFF3FB950),
+                  unselectedColor: const Color(0xFF8B949E),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PatientCallCard extends StatelessWidget {
+  final ChatRequestModel call;
+  final UserModel nurse;
+  final VoidCallback onAnswer;
+
+  const _PatientCallCard({
+    required this.call,
+    required this.nurse,
+    required this.onAnswer,
+  });
+
+  Future<void> _showDeclineDialog(BuildContext context) async {
+    final reasons = [
+      'Currently attending another patient',
+      'Off duty — please call another nurse',
+      'Outside my ward area',
+      'Technical issue',
+      'Other',
+    ];
+
+    String? selectedReason;
+    final customCtrl = TextEditingController();
+
+    await showDialog(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setState) => AlertDialog(
+          backgroundColor: const Color(0xFF161B22),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: Color(0xFF30363D)),
+          ),
+          title: const Text(
+            'Decline Reason',
+            style: TextStyle(
+                color: Color(0xFFE6EDF3), fontWeight: FontWeight.w600),
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Please select or type a reason:',
+                  style: TextStyle(color: Color(0xFF8B949E), fontSize: 13),
+                ),
+                const SizedBox(height: 12),
+                ...reasons.map((r) => RadioListTile<String>(
+                      value: r,
+                      groupValue: selectedReason,
+                      onChanged: (v) => setState(() => selectedReason = v),
+                      title: Text(r,
+                          style: const TextStyle(
+                              color: Color(0xFFE6EDF3), fontSize: 13)),
+                      activeColor: const Color(0xFF00BFA5),
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                    )),
+                if (selectedReason == 'Other') ...[
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: customCtrl,
+                    style: const TextStyle(color: Color(0xFFE6EDF3)),
+                    decoration: InputDecoration(
+                      hintText: 'Type your reason...',
+                      hintStyle: const TextStyle(color: Color(0xFF8B949E)),
+                      filled: true,
+                      fillColor: const Color(0xFF21262D),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel',
+                  style: TextStyle(color: Color(0xFF8B949E))),
+            ),
+            ElevatedButton(
+              onPressed: selectedReason == null
+                  ? null
+                  : () async {
+                      Navigator.pop(ctx);
+                      final reason = selectedReason == 'Other'
+                          ? customCtrl.text.trim()
+                          : selectedReason!;
+                      await FirestoreService().declineCallWithReason(
+                        requestId: call.id,
+                        reason: reason,
+                      );
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFCF6679),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                elevation: 0,
+              ),
+              child: const Text('Decline'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isEmergency = call.urgency == 'emergency';
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isEmergency
+            ? const Color(0xFFCF6679).withOpacity(0.1)
+            : const Color(0xFF3FB950).withOpacity(0.1),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isEmergency
+              ? const Color(0xFFCF6679).withOpacity(0.5)
+              : const Color(0xFF3FB950).withOpacity(0.5),
+          width: isEmergency ? 2 : 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              _PulsingIcon(isEmergency: isEmergency),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      call.patientName,
+                      style: const TextStyle(
+                        color: Color(0xFFE6EDF3),
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      isEmergency
+                          ? '🚨 Emergency — urgent help needed'
+                          : '🔔 Requesting a nurse',
+                      style: TextStyle(
+                        color: isEmergency
+                            ? const Color(0xFFCF6679)
+                            : const Color(0xFF3FB950),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // ✅ Answer + Decline buttons
+          Row(
+            children: [
+              // Decline with reason
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _showDeclineDialog(context),
+                  icon: const Icon(Icons.close,
+                      size: 14, color: Color(0xFF8B949E)),
+                  label: const Text('Decline',
+                      style: TextStyle(color: Color(0xFF8B949E), fontSize: 12)),
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFF30363D)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              // Answer
+              Expanded(
+                flex: 2,
+                child: ElevatedButton.icon(
+                  onPressed: onAnswer,
+                  icon: const Icon(Icons.call, size: 14),
+                  label: const Text('Answer',
+                      style:
+                          TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: isEmergency
+                        ? const Color(0xFFCF6679)
+                        : const Color(0xFF3FB950),
+                    foregroundColor: isEmergency ? Colors.white : Colors.black,
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    elevation: 0,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PulsingIcon extends StatefulWidget {
+  final bool isEmergency;
+  const _PulsingIcon({required this.isEmergency});
+
+  @override
+  State<_PulsingIcon> createState() => _PulsingIconState();
+}
+
+class _PulsingIconState extends State<_PulsingIcon>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+  late Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: widget.isEmergency ? 500 : 900),
+    )..repeat(reverse: true);
+    _anim = Tween<double>(begin: 0.4, end: 1.0).animate(
+      CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final color =
+        widget.isEmergency ? const Color(0xFFCF6679) : const Color(0xFF3FB950);
+
+    return FadeTransition(
+      opacity: _anim,
+      child: Container(
+        width: 44,
+        height: 44,
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.15),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(
+          widget.isEmergency ? Icons.emergency : Icons.notifications_active,
+          color: color,
+          size: 22,
+        ),
       ),
     );
   }
@@ -578,6 +919,72 @@ class _NursePatientsTabState extends State<_NursePatientsTab> {
       ),
       body: Column(
         children: [
+          StreamBuilder<List<ChatRequestModel>>(
+            stream: FirestoreService().getPatientCallsStream(),
+            builder: (context, snapshot) {
+              final calls = snapshot.data ?? [];
+              if (calls.isEmpty) return const SizedBox.shrink();
+
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFFCF6679),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          '${calls.length} patient call(s) waiting',
+                          style: const TextStyle(
+                            color: Color(0xFFCF6679),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  ...calls.map((call) => _PatientCallCard(
+                        call: call,
+                        nurse: widget.user!,
+                        onAnswer: () async {
+                          final convId = await FirestoreService().answerCall(
+                            requestId: call.id,
+                            nurseId: widget.user!.uid,
+                            nurseName: widget.user!.name,
+                            patientId: call.patientId,
+                          );
+                          if (context.mounted) {
+                            context
+                                .read<ConversationProvider>()
+                                .initWithConversationId(convId);
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content:
+                                    Text('Connected with ${call.patientName}'),
+                                backgroundColor: const Color(0xFF3FB950),
+                                behavior: SnackBarBehavior.floating,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                      )),
+                  const Divider(color: Color(0xFF30363D), height: 1),
+                ],
+              );
+            },
+          ),
           // Search bar
           Padding(
             padding: const EdgeInsets.all(16),

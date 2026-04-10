@@ -9,6 +9,11 @@ import '../../models/chat_request_model.dart';
 import '../../widgets/message_bubble.dart';
 import '../../widgets/camera_preview_widget.dart';
 import '../../services/haptic_service.dart';
+import '../../services/firestore_service.dart';
+import '../../services/notification_service.dart';
+import '../../services/location_service.dart';
+import '../../services/notification_service.dart';
+import '../../services/location_service.dart';
 
 class PatientHomeScreen extends StatefulWidget {
   const PatientHomeScreen({super.key});
@@ -59,6 +64,27 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
             );
         // ✅ FIX #1: Start REAL-TIME stream for incoming requests
         context.read<ChatRequestProvider>().listenForRequests(user.uid);
+        // Add to didChangeDependencies, after listenForRequests:
+        FirestoreService().getDeclinedCallsStream(user.uid).listen((calls) {
+          for (final call in calls) {
+            if (call.declineReason != null && mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    'A nurse declined: ${call.declineReason}',
+                  ),
+                  backgroundColor: const Color(0xFFCF6679),
+                  behavior: SnackBarBehavior.floating,
+                  duration: const Duration(seconds: 5),
+                  margin: const EdgeInsets.all(12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                ),
+              );
+            }
+          }
+        });
       }
     }
   }
@@ -68,6 +94,61 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     _textCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
+  }
+
+  // Add this method to _PatientHomeScreenState:
+  Future<void> _ringCallBell(String urgency) async {
+    final user = context.read<AuthProvider>().user;
+    if (user == null) return;
+
+    // Get patient location
+    final position = await LocationService().getCurrentPosition();
+
+    // Save call to Firestore
+    final requestId = await FirestoreService().sendCallBell(
+      patientId: user.uid,
+      patientName: user.name,
+      urgency: urgency,
+    );
+
+    // Broadcast to nearby nurses if location available
+    if (position != null) {
+      await NotificationService().broadcastToNearbyNurses(
+        patientId: user.uid,
+        patientName: user.name,
+        urgency: urgency,
+        patientLat: position.latitude,
+        patientLng: position.longitude,
+        callRequestId: requestId,
+      );
+    }
+
+    if (mounted) {
+      HapticService.incomingRequest();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.notifications_active,
+                  color: Colors.white, size: 16),
+              const SizedBox(width: 8),
+              Text(urgency == 'emergency'
+                  ? '🚨 Emergency alert sent to all nearby nurses!'
+                  : '🔔 Call sent — a nurse will respond shortly'),
+            ],
+          ),
+          backgroundColor: urgency == 'emergency'
+              ? const Color(0xFFCF6679)
+              : const Color(0xFF3FB950),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.all(12),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
   }
 
   Future<void> _sendMessage(String text, MessageType type) async {
@@ -94,6 +175,96 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
         );
       }
     });
+  }
+
+  void _showCallOptions() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF161B22),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: const Color(0xFF30363D),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Text(
+              'Call a Nurse',
+              style: TextStyle(
+                color: Color(0xFFE6EDF3),
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'A nurse will respond and open a chat with you',
+              style: TextStyle(color: Color(0xFF8B949E), fontSize: 13),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+
+            // Normal call
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _ringCallBell('normal');
+                },
+                icon: const Icon(Icons.notifications_outlined, size: 20),
+                label: const Text('Request a Nurse',
+                    style: TextStyle(fontSize: 15)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF3FB950),
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 0,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // Emergency call
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: () {
+                  Navigator.pop(context);
+                  _ringCallBell('emergency');
+                },
+                icon: const Icon(Icons.emergency_outlined, size: 20),
+                label: const Text('Emergency — Urgent Help',
+                    style: TextStyle(fontSize: 15)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFCF6679),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 0,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
   }
 
   void _simulateGesture(Map<String, String> gesture) {
@@ -358,6 +529,13 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
             icon: const Icon(Icons.sign_language,
                 color: Color(0xFF8B949E), size: 20),
             onPressed: () => Navigator.pushNamed(context, '/gesture-demo'),
+          ),
+          // In the AppBar actions list, ADD before the history icon:
+          IconButton(
+            icon: const Icon(Icons.add_ic_call,
+                color: Color(0xFF3FB950), size: 22),
+            tooltip: 'Call a nurse',
+            onPressed: () => _showCallOptions(),
           ),
           IconButton(
             icon: const Icon(Icons.history, color: Color(0xFF8B949E), size: 20),

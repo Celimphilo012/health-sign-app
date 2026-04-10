@@ -8,6 +8,9 @@ class ChatRequestProvider extends ChangeNotifier {
   final FirestoreService _service = FirestoreService();
 
   // Stream subscriptions
+  StreamSubscription<List<ChatRequestModel>>? _patientCallsSub;
+  List<ChatRequestModel> _patientCalls = [];
+  List<ChatRequestModel> get patientCalls => _patientCalls;
   StreamSubscription<List<ChatRequestModel>>? _incomingRequestsSub;
   StreamSubscription<ChatRequestModel?>? _activeRequestSub;
 
@@ -26,8 +29,7 @@ class ChatRequestProvider extends ChangeNotifier {
   // ── REAL-TIME: listen for incoming requests (patient) ─
   void listenForRequests(String patientId) {
     _incomingRequestsSub?.cancel();
-    _incomingRequestsSub =
-        _service.getIncomingRequestsStream(patientId).listen(
+    _incomingRequestsSub = _service.getIncomingRequestsStream(patientId).listen(
       (requests) {
         _incomingRequests = requests;
         notifyListeners();
@@ -36,18 +38,28 @@ class ChatRequestProvider extends ChangeNotifier {
     );
   }
 
+  void listenForPatientCalls() {
+    _patientCallsSub?.cancel();
+    _patientCallsSub = _service.getPatientCallsStream().listen(
+      (calls) {
+        _patientCalls = calls;
+        notifyListeners();
+        debugPrint('Patient calls updated: ${calls.length} calls');
+      },
+      onError: (e) => debugPrint('Patient calls stream error: $e'),
+    );
+  }
+
   // ── REAL-TIME: listen for accepted request (nurse) ────
   void listenForAcceptedRequest(String nurseId) {
     _activeRequestSub?.cancel();
-    _activeRequestSub =
-        _service.getNurseActiveChatStream(nurseId).listen(
+    _activeRequestSub = _service.getNurseActiveChatStream(nurseId).listen(
       (request) {
         final wasNull = _activeRequest == null;
         _activeRequest = request;
         // Notify so nurse UI updates immediately
         notifyListeners();
-        debugPrint(
-            'Active request updated: ${request?.patientName ?? 'none'}');
+        debugPrint('Active request updated: ${request?.patientName ?? 'none'}');
       },
       onError: (e) => debugPrint('Active request error: $e'),
     );
@@ -106,11 +118,9 @@ class ChatRequestProvider extends ChangeNotifier {
   }
 
   // ── Accept request ────────────────────────────────────
-  Future<String?> acceptRequest(
-      String requestId, String patientId) async {
+  Future<String?> acceptRequest(String requestId, String patientId) async {
     try {
-      final convId =
-          await _service.acceptChatRequest(requestId, patientId);
+      final convId = await _service.acceptChatRequest(requestId, patientId);
       // Remove from incoming list immediately
       _incomingRequests.removeWhere((r) => r.id == requestId);
       notifyListeners();
@@ -148,6 +158,7 @@ class ChatRequestProvider extends ChangeNotifier {
   void dispose() {
     _incomingRequestsSub?.cancel();
     _activeRequestSub?.cancel();
+    _patientCallsSub?.cancel();
     super.dispose();
   }
 }

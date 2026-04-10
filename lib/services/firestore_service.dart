@@ -51,8 +51,7 @@ class FirestoreService {
   }
 
   // ── Update last message ───────────────────────────────
-  Future<void> updateLastMessage(
-      String conversationId, String message) async {
+  Future<void> updateLastMessage(String conversationId, String message) async {
     if (conversationId.isEmpty) return;
     await _db.collection('conversations').doc(conversationId).update({
       'lastMessage': message,
@@ -62,19 +61,15 @@ class FirestoreService {
 
   // ── Get all nurses ────────────────────────────────────
   Future<List<UserModel>> getNurses() async {
-    final snap = await _db
-        .collection('users')
-        .where('role', isEqualTo: 'nurse')
-        .get();
+    final snap =
+        await _db.collection('users').where('role', isEqualTo: 'nurse').get();
     return snap.docs.map((doc) => UserModel.fromFirestore(doc)).toList();
   }
 
   // ── Get all patients ──────────────────────────────────
   Future<List<UserModel>> getPatients() async {
-    final snap = await _db
-        .collection('users')
-        .where('role', isEqualTo: 'patient')
-        .get();
+    final snap =
+        await _db.collection('users').where('role', isEqualTo: 'patient').get();
     return snap.docs.map((doc) => UserModel.fromFirestore(doc)).toList();
   }
 
@@ -121,8 +116,7 @@ class FirestoreService {
   }
 
   // ── REAL-TIME: incoming requests for patient ──────────
-  Stream<List<ChatRequestModel>> getIncomingRequestsStream(
-      String patientId) {
+  Stream<List<ChatRequestModel>> getIncomingRequestsStream(String patientId) {
     return _db
         .collection('chat_requests')
         .where('patientId', isEqualTo: patientId)
@@ -148,14 +142,88 @@ class FirestoreService {
   }
 
   // ── Accept request ────────────────────────────────────
-  Future<String> acceptChatRequest(
-      String requestId, String patientId) async {
+  Future<String> acceptChatRequest(String requestId, String patientId) async {
     final convId = await getOrCreateConversation(patientId);
     await _db.collection('chat_requests').doc(requestId).update({
       'status': 'accepted',
       'conversationId': convId,
     });
     return convId;
+  }
+
+// ── Patient sends a call bell alert ───────────────────
+  Future<String> sendCallBell({
+    required String patientId,
+    required String patientName,
+    required String urgency,
+  }) async {
+    final existing = await _db
+        .collection('chat_requests')
+        .where('patientId', isEqualTo: patientId)
+        .where('status', isEqualTo: 'calling')
+        .get();
+    for (final doc in existing.docs) {
+      await doc.reference.delete();
+    }
+
+    // ✅ Returns the document ID
+    final ref = await _db.collection('chat_requests').add({
+      'nurseId': null,
+      'nurseName': '',
+      'patientId': patientId,
+      'patientName': patientName,
+      'status': 'calling',
+      'urgency': urgency,
+      'createdAt': Timestamp.now(),
+      'conversationId': null,
+      'initiatedBy': 'patient',
+    });
+
+    return ref.id; // ✅ Return the ID
+  }
+
+// ── Nurses listen for all incoming patient calls ───────
+  // ── Patient calls stream (NO orderBy to avoid index issue) ─
+  Stream<List<ChatRequestModel>> getPatientCallsStream() {
+    return _db
+        .collection('chat_requests')
+        .where('status', isEqualTo: 'calling')
+        .snapshots()
+        .map((snap) {
+      final list =
+          snap.docs.map((doc) => ChatRequestModel.fromFirestore(doc)).toList();
+      // Sort in memory instead
+      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return list;
+    });
+  }
+
+// ── Nurse answers a patient call ───────────────────────
+  Future<String> answerCall({
+    required String requestId,
+    required String nurseId,
+    required String nurseName,
+    required String patientId,
+  }) async {
+    final convId = await getOrCreateConversation(patientId);
+    await _db.collection('chat_requests').doc(requestId).update({
+      'nurseId': nurseId,
+      'nurseName': nurseName,
+      'status': 'accepted',
+      'conversationId': convId,
+    });
+    return convId;
+  }
+
+  Future<void> declineCallWithReason({
+    required String requestId,
+    required String reason,
+  }) async {
+    await _db.collection('chat_requests').doc(requestId).update({
+      'status': 'declined',
+      'declineReason': reason,
+      'declinedAt': Timestamp.now(),
+    });
   }
 
   // ── Decline request ───────────────────────────────────
@@ -174,9 +242,20 @@ class FirestoreService {
     });
   }
 
+  Stream<List<ChatRequestModel>> getDeclinedCallsStream(String patientId) {
+    return _db
+        .collection('chat_requests')
+        .where('patientId', isEqualTo: patientId)
+        .where('status', isEqualTo: 'declined')
+        .where('initiatedBy', isEqualTo: 'patient')
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((doc) => ChatRequestModel.fromFirestore(doc))
+            .toList());
+  }
+
   // ── Nurse chat history (ended convos) ─────────────────
-  Stream<List<ChatRequestModel>> getNurseChatHistoryStream(
-      String nurseId) {
+  Stream<List<ChatRequestModel>> getNurseChatHistoryStream(String nurseId) {
     return _db
         .collection('chat_requests')
         .where('nurseId', isEqualTo: nurseId)

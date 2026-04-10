@@ -4,7 +4,7 @@ enum RequestStatus { pending, accepted, declined, ended }
 
 class ChatRequestModel {
   final String id;
-  final String nurseId;
+  final String? nurseId;
   final String nurseName;
   final String patientId;
   final String patientName;
@@ -12,6 +12,9 @@ class ChatRequestModel {
   final DateTime createdAt;
   final DateTime? endedAt;
   final String? conversationId;
+  final String urgency; // ← NEW
+  final String initiatedBy;
+  final String? declineReason;
 
   ChatRequestModel({
     required this.id,
@@ -23,6 +26,9 @@ class ChatRequestModel {
     required this.createdAt,
     this.endedAt,
     this.conversationId,
+    this.urgency = 'normal',
+    this.initiatedBy = 'nurse',
+    this.declineReason,
   });
 
   factory ChatRequestModel.fromFirestore(DocumentSnapshot doc) {
@@ -39,6 +45,9 @@ class ChatRequestModel {
           ? (data['endedAt'] as Timestamp).toDate()
           : null,
       conversationId: data['conversationId'],
+      urgency: data['urgency'] ?? 'normal',
+      initiatedBy: data['initiatedBy'] ?? 'nurse',
+      declineReason: data['declineReason'],
     );
   }
 
@@ -65,6 +74,8 @@ class ChatRequestModel {
       'createdAt': Timestamp.fromDate(createdAt),
       if (endedAt != null) 'endedAt': Timestamp.fromDate(endedAt!),
       'conversationId': conversationId,
+      'urgency': urgency,
+      'initiatedBy': initiatedBy,
     };
   }
 }
