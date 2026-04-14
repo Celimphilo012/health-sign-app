@@ -48,3 +48,7 @@ coverage/
 *.apk
 *.aab
 *.ipa
+ml_training/dataset/
+ml_training/venv/
+ml_training/landmarks.csv
+ml_training/__pycache__/
