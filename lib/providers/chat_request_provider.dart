@@ -70,7 +70,8 @@ class ChatRequestProvider extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
     try {
-      _patients = await _service.getPatients();
+      final all = await _service.getPatients();
+      _patients = all.where((p) => !p.isDisabled).toList();
       _filteredPatients = List.from(_patients);
     } catch (e) {
       debugPrint('Error loading patients: $e');

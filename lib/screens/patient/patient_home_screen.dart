@@ -106,27 +106,16 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
     final user = context.read<AuthProvider>().user;
     if (user == null) return;
 
-    // Get patient location
     final position = await LocationService().getCurrentPosition();
 
-    // Save call to Firestore
-    final requestId = await FirestoreService().sendCallBell(
+    // Write to Firestore — Cloud Function trigger handles FCM to nearby nurses
+    await FirestoreService().sendCallBell(
       patientId: user.uid,
       patientName: user.name,
       urgency: urgency,
+      patientLat: position?.latitude,
+      patientLng: position?.longitude,
     );
-
-    // Broadcast to nearby nurses if location available
-    if (position != null) {
-      await NotificationService().broadcastToNearbyNurses(
-        patientId: user.uid,
-        patientName: user.name,
-        urgency: urgency,
-        patientLat: position.latitude,
-        patientLng: position.longitude,
-        callRequestId: requestId,
-      );
-    }
 
     if (mounted) {
       HapticService.incomingRequest();

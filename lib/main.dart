@@ -14,6 +14,7 @@ import 'screens/auth/register_screen.dart';
 import 'screens/patient/patient_home_screen.dart';
 import 'screens/nurse/nurse_home_screen.dart';
 import 'screens/shared/gesture_demo_screen.dart';
+import 'screens/admin/admin_home_screen.dart';
 import 'providers/chat_request_provider.dart';
 
 void main() async {
@@ -78,6 +79,7 @@ class HealthSignApp extends StatelessWidget {
           '/nurse-home': (_) => const NurseHomeScreen(),
           '/history': (_) => const ConversationHistoryScreen(),
           '/gesture-demo': (_) => const GestureDemoScreen(),
+          '/admin-home': (_) => const AdminHomeScreen(),
         },
       ),
     );

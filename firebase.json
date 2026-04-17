@@ -1,1 +1,27 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"health-sign-app","appId":"1:242651025689:android:927e20adde0c244a7cb588","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"health-sign-app","configurations":{"android":"1:242651025689:android:927e20adde0c244a7cb588","ios":"1:242651025689:ios:40b4429c8bb9cb667cb588","web":"1:242651025689:web:cc24ee37cd281f587cb588"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "health-sign-app",
+          "appId": "1:242651025689:android:927e20adde0c244a7cb588",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "health-sign-app",
+          "configurations": {
+            "android": "1:242651025689:android:927e20adde0c244a7cb588",
+            "ios": "1:242651025689:ios:40b4429c8bb9cb667cb588",
+            "web": "1:242651025689:web:cc24ee37cd281f587cb588"
+          }
+        }
+      }
+    }
+  },
+  "functions": {
+    "source": "functions",
+    "runtime": "nodejs20"
+  }
+}

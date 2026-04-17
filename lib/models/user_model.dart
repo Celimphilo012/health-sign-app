@@ -1,6 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-enum UserRole { patient, nurse }
+enum UserRole { patient, nurse, superAdmin }
 
 class UserModel {
   final String uid;
@@ -9,6 +9,7 @@ class UserModel {
   final UserRole role;
   final DateTime createdAt;
   final String? profileImageUrl;
+  final bool isDisabled;
 
   UserModel({
     required this.uid,
@@ -17,19 +18,41 @@ class UserModel {
     required this.role,
     required this.createdAt,
     this.profileImageUrl,
+    this.isDisabled = false,
   });
 
-  String get roleString => role == UserRole.patient ? 'patient' : 'nurse';
+  String get roleString {
+    switch (role) {
+      case UserRole.nurse:
+        return 'nurse';
+      case UserRole.superAdmin:
+        return 'superAdmin';
+      case UserRole.patient:
+        return 'patient';
+    }
+  }
 
   factory UserModel.fromFirestore(DocumentSnapshot doc) {
     final data = doc.data() as Map<String, dynamic>;
+    UserRole role;
+    switch (data['role']) {
+      case 'nurse':
+        role = UserRole.nurse;
+        break;
+      case 'superAdmin':
+        role = UserRole.superAdmin;
+        break;
+      default:
+        role = UserRole.patient;
+    }
     return UserModel(
       uid: doc.id,
       name: data['name'] ?? '',
       email: data['email'] ?? '',
-      role: data['role'] == 'nurse' ? UserRole.nurse : UserRole.patient,
+      role: role,
       createdAt: (data['createdAt'] as Timestamp).toDate(),
       profileImageUrl: data['profileImageUrl'],
+      isDisabled: data['isDisabled'] ?? false,
     );
   }
 

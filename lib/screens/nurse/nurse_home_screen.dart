@@ -25,6 +25,7 @@ class NurseHomeScreen extends StatefulWidget {
 class _NurseHomeScreenState extends State<NurseHomeScreen> {
   int _currentIndex = 0;
   bool _initialized = false;
+  int _lastCallCount = 0;
 
   @override
   void didChangeDependencies() {
@@ -42,6 +43,53 @@ class _NurseHomeScreenState extends State<NurseHomeScreen> {
     }
   }
 
+  @override
+  void didUpdateWidget(NurseHomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+  }
+
+  void _checkForNewCalls(List<ChatRequestModel> calls) {
+    if (calls.length > _lastCallCount) {
+      final newest = calls.first;
+      final isEmergency = newest.urgency == 'emergency';
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Row(
+            children: [
+              Icon(isEmergency ? Icons.emergency : Icons.notifications_active,
+                  color: Colors.white, size: 18),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  isEmergency
+                      ? '🚨 EMERGENCY: ${newest.patientName} needs urgent help!'
+                      : '🔔 ${newest.patientName} is calling for a nurse',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+              ),
+              TextButton(
+                onPressed: () {
+                  ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                  setState(() => _currentIndex = 1);
+                },
+                child: const Text('View',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+          backgroundColor:
+              isEmergency ? const Color(0xFFCF6679) : const Color(0xFF00BFA5),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.all(12),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          duration: const Duration(seconds: 8),
+        ));
+      });
+    }
+    _lastCallCount = calls.length;
+  }
+
   Future<void> _saveNursePresence(String nurseId) async {
     final position = await LocationService().getCurrentPosition();
     if (position != null) {
@@ -56,7 +104,9 @@ class _NurseHomeScreenState extends State<NurseHomeScreen> {
   @override
   Widget build(BuildContext context) {
     final user = context.watch<AuthProvider>().user;
-    final hasActiveChat = context.watch<ChatRequestProvider>().hasActiveChat;
+    final chatProvider = context.watch<ChatRequestProvider>();
+    final hasActiveChat = chatProvider.hasActiveChat;
+    _checkForNewCalls(chatProvider.patientCalls);
 
     return Scaffold(
       backgroundColor: const Color(0xFF0D1117),
@@ -991,7 +1041,10 @@ class _NursePatientsTabState extends State<_NursePatientsTab> {
             child: TextField(
               controller: _searchCtrl,
               style: const TextStyle(color: Color(0xFFE6EDF3)),
-              onChanged: provider.searchPatients,
+              onChanged: (q) {
+                setState(() {});
+                provider.searchPatients(q);
+              },
               decoration: InputDecoration(
                 hintText: 'Search patients by name...',
                 hintStyle: const TextStyle(color: Color(0xFF8B949E)),
@@ -1002,7 +1055,7 @@ class _NursePatientsTabState extends State<_NursePatientsTab> {
                         icon: const Icon(Icons.clear,
                             color: Color(0xFF8B949E), size: 18),
                         onPressed: () {
-                          _searchCtrl.clear();
+                          setState(() => _searchCtrl.clear());
                           provider.clearSearch();
                         },
                       )

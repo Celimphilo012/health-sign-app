@@ -156,6 +156,8 @@ class FirestoreService {
     required String patientId,
     required String patientName,
     required String urgency,
+    double? patientLat,
+    double? patientLng,
   }) async {
     final existing = await _db
         .collection('chat_requests')
@@ -166,7 +168,6 @@ class FirestoreService {
       await doc.reference.delete();
     }
 
-    // ✅ Returns the document ID
     final ref = await _db.collection('chat_requests').add({
       'nurseId': null,
       'nurseName': '',
@@ -177,9 +178,11 @@ class FirestoreService {
       'createdAt': Timestamp.now(),
       'conversationId': null,
       'initiatedBy': 'patient',
+      if (patientLat != null && patientLng != null)
+        'patientLocation': GeoPoint(patientLat, patientLng),
     });
 
-    return ref.id; // ✅ Return the ID
+    return ref.id;
   }
 
 // ── Nurses listen for all incoming patient calls ───────

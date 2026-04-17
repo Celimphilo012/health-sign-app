@@ -21,6 +21,8 @@ class NotificationService {
 
   static const String _channelId = 'healthsign_alerts';
   static const String _channelName = 'HealthSign Alerts';
+  static const String _emergencyChannelId = 'healthsign_emergency';
+  static const String _emergencyChannelName = 'HealthSign Emergency Calls';
 
   // ── Initialize ────────────────────────────────────────
   Future<void> initialize() async {
@@ -52,6 +54,19 @@ class NotificationService {
         importance: Importance.max,
         playSound: true,
         enableVibration: true,
+      ),
+    );
+
+    // High-priority emergency channel for call alerts
+    await androidPlugin?.createNotificationChannel(
+      const AndroidNotificationChannel(
+        _emergencyChannelId,
+        _emergencyChannelName,
+        importance: Importance.max,
+        playSound: true,
+        enableVibration: true,
+        enableLights: true,
+        ledColor: Color(0xFFCF6679),
       ),
     );
 
@@ -102,20 +117,34 @@ class NotificationService {
     final RemoteNotification? notification = message.notification;
     if (notification == null) return;
 
+    final isEmergency = message.data['urgency'] == 'emergency';
+    final channelId = isEmergency ? _emergencyChannelId : _channelId;
+    final channelName = isEmergency ? _emergencyChannelName : _channelName;
+    final color = isEmergency ? const Color(0xFFCF6679) : const Color(0xFF00BFA5);
+
     await _localNotif.show(
       notification.hashCode,
       notification.title,
       notification.body,
       NotificationDetails(
         android: AndroidNotificationDetails(
-          _channelId,
-          _channelName,
+          channelId,
+          channelName,
           importance: Importance.max,
-          priority: Priority.high,
+          priority: Priority.max,
           icon: '@mipmap/ic_launcher',
-          color: const Color(0xFF00BFA5),
+          color: color,
           playSound: true,
           enableVibration: true,
+          enableLights: true,
+          ledColor: color,
+          ledOnMs: 300,
+          ledOffMs: 300,
+          fullScreenIntent: true,
+          category: AndroidNotificationCategory.call,
+          visibility: NotificationVisibility.public,
+          autoCancel: false,
+          ongoing: isEmergency,
         ),
       ),
       payload: jsonEncode(message.data),

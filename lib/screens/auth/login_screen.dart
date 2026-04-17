@@ -63,10 +63,15 @@ class _LoginScreenState extends State<LoginScreen>
         isSuccess: true,
       );
       final role = auth.user?.role;
-      Navigator.pushReplacementNamed(
-        context,
-        role == UserRole.nurse ? '/nurse-home' : '/patient-home',
-      );
+      String route;
+      if (role == UserRole.superAdmin) {
+        route = '/admin-home';
+      } else if (role == UserRole.nurse) {
+        route = '/nurse-home';
+      } else {
+        route = '/patient-home';
+      }
+      Navigator.pushReplacementNamed(context, route);
     } else {
       AppHelpers.showSnackbar(
         context,

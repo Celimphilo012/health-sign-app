@@ -88,10 +88,15 @@ class _SplashScreenState extends State<SplashScreen>
     final auth = context.read<AuthProvider>();
     if (auth.isAuthenticated) {
       final role = auth.user?.role;
-      Navigator.pushReplacementNamed(
-        context,
-        role == UserRole.nurse ? '/nurse-home' : '/patient-home',
-      );
+      String route;
+      if (role == UserRole.superAdmin) {
+        route = '/admin-home';
+      } else if (role == UserRole.nurse) {
+        route = '/nurse-home';
+      } else {
+        route = '/patient-home';
+      }
+      Navigator.pushReplacementNamed(context, route);
     } else {
       Navigator.pushReplacementNamed(context, '/login');
     }
