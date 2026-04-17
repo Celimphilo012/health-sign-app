@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:ui';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
@@ -18,33 +17,103 @@ class GestureService {
   bool get isDetecting => _isDetecting;
 
   static const Map<String, String> gestureMap = {
+    // ── Basic responses ───────────────────────────────
     'Open_Palm': 'Stop / Wait',
     'Closed_Fist': 'I am in pain',
     'Thumb_Up': 'Yes / I agree',
     'Thumb_Down': 'No / I disagree',
     'Victory': 'I am okay',
     'Pointing_Up': 'I need attention',
-    'None': '',
     'Wave': 'Hello / Goodbye',
+    'None': '',
+
+    // ── Pain & medical ────────────────────────────────
     'Hand_on_chest': 'I have chest pain',
     'Head_touch': 'I have a headache',
-    'Arms_crossed': 'I am cold',
-    'Hand_on_belly': 'I have stomach pain',
+    'Arms_crossed': 'I feel cold',
+    'Hand_on_belly': 'I feel nauseous',
+    'Throat_touch': 'I have a sore throat / I am thirsty',
+    'Both_hands_chest': 'I have difficulty breathing',
+    'Scratch_arm': 'I am itching',
+    'Cup_area': 'I have swelling',
+
+    // ── Urgency & emergency ───────────────────────────
+    'Hands_on_throat': 'I cannot breathe — EMERGENCY',
+    'Hand_over_mouth': 'I am going to vomit',
+    'Point_wound': 'I am bleeding',
+    'Allergic': 'I am having an allergic reaction',
+    'Pain_worse': 'My pain is getting worse',
+    'Pain_better': 'My pain is getting better',
+
+    // ── Basic needs ───────────────────────────────────
+    'Rub_stomach': 'I am hungry',
+    'Fan_face': 'I feel hot / I have a fever',
+    'Sleep_gesture': 'I want to sleep / I am tired',
+    'Phone_gesture': 'Please call my family',
+    'Toilet_gesture': 'I need to use the toilet',
+    'Water_gesture': 'I need water',
+    'Medicine_gesture': 'I need my medicine',
+
+    // ── Positioning ───────────────────────────────────
+    'Palm_down': 'I want to lie down',
+    'Palm_up': 'Please help me sit up',
+
+    // ── Communication ─────────────────────────────────
+    'Confused': 'I am confused / I do not understand',
+    'Circle_finger': 'Please repeat that',
+    'Nod_gesture': 'I understand',
+    'Call_nurse': 'Please call a nurse',
+    'Call_family': 'Please call my family',
   };
 
   static const Map<String, String> gestureEmoji = {
+    // ── Basic responses ───────────────────────────────
     'Open_Palm': '✋',
     'Closed_Fist': '✊',
     'Thumb_Up': '👍',
     'Thumb_Down': '👎',
     'Victory': '✌️',
     'Pointing_Up': '☝️',
-    'None': '🤚',
     'Wave': '👋',
+    'None': '🤚',
+
+    // ── Pain & medical ────────────────────────────────
     'Hand_on_chest': '💔',
     'Head_touch': '🤕',
     'Arms_crossed': '🥶',
     'Hand_on_belly': '🤢',
+    'Throat_touch': '🗣️',
+    'Both_hands_chest': '😮‍💨',
+    'Scratch_arm': '🦟',
+    'Cup_area': '🫧',
+
+    // ── Urgency & emergency ───────────────────────────
+    'Hands_on_throat': '🚨',
+    'Hand_over_mouth': '🤮',
+    'Point_wound': '🩸',
+    'Allergic': '⚠️',
+    'Pain_worse': '📈',
+    'Pain_better': '📉',
+
+    // ── Basic needs ───────────────────────────────────
+    'Rub_stomach': '🍽️',
+    'Fan_face': '🥵',
+    'Sleep_gesture': '😴',
+    'Phone_gesture': '📞',
+    'Toilet_gesture': '🚽',
+    'Water_gesture': '💧',
+    'Medicine_gesture': '💊',
+
+    // ── Positioning ───────────────────────────────────
+    'Palm_down': '🛏️',
+    'Palm_up': '🙋',
+
+    // ── Communication ─────────────────────────────────
+    'Confused': '😕',
+    'Circle_finger': '🔁',
+    'Nod_gesture': '👆',
+    'Call_nurse': '📣',
+    'Call_family': '👨‍👩‍👧',
   };
 
   Future<void> initCamera() async {
@@ -129,112 +198,299 @@ class GestureService {
   }
 
   // ── Classify gesture from pose landmarks ──────────────
-  // Uses wrist + elbow positions for basic gesture detection
   String? _classifyFromPose(List<Pose> poses) {
     if (poses.isEmpty) return 'None';
 
     final pose = poses.first;
-    final landmarks = pose.landmarks;
+    final lm = pose.landmarks;
 
-    // Get hand/wrist landmarks
-    final leftWrist = landmarks[PoseLandmarkType.leftWrist];
-    final rightWrist = landmarks[PoseLandmarkType.rightWrist];
-    final leftElbow = landmarks[PoseLandmarkType.leftElbow];
-    final rightElbow = landmarks[PoseLandmarkType.rightElbow];
-    final leftShoulder = landmarks[PoseLandmarkType.leftShoulder];
-    final rightShoulder = landmarks[PoseLandmarkType.rightShoulder];
-    final nose = landmarks[PoseLandmarkType.nose];
+    // Core landmarks
+    final leftWrist = lm[PoseLandmarkType.leftWrist];
+    final rightWrist = lm[PoseLandmarkType.rightWrist];
+    final leftElbow = lm[PoseLandmarkType.leftElbow];
+    final rightElbow = lm[PoseLandmarkType.rightElbow];
+    final leftShoulder = lm[PoseLandmarkType.leftShoulder];
+    final rightShoulder = lm[PoseLandmarkType.rightShoulder];
+    final leftHip = lm[PoseLandmarkType.leftHip];
+    final rightHip = lm[PoseLandmarkType.rightHip];
+    final nose = lm[PoseLandmarkType.nose];
+    final leftEar = lm[PoseLandmarkType.leftEar];
+    final rightEar = lm[PoseLandmarkType.rightEar];
 
     if (leftWrist == null && rightWrist == null) return 'None';
 
-    // Use the more confident hand
+    // Use the more confident/visible hand
     final wrist = (rightWrist?.likelihood ?? 0) > (leftWrist?.likelihood ?? 0)
-        ? rightWrist
-        : leftWrist;
+        ? rightWrist!
+        : leftWrist!;
     final elbow = wrist == rightWrist ? rightElbow : leftElbow;
     final shoulder = wrist == rightWrist ? rightShoulder : leftShoulder;
+    final hip = wrist == rightWrist ? rightHip : leftHip;
+    final ear = wrist == rightWrist ? rightEar : leftEar;
 
-    if (wrist == null || wrist.likelihood < 0.5) return 'None';
+    if (wrist.likelihood < 0.5) return 'None';
 
-    // ── Gesture detection using body positions ─────────
+    // ── Helper values ──────────────────────────────────
+    final double wX = wrist.x;
+    final double wY = wrist.y;
+    final double shoulderY = shoulder?.y ?? 0;
+    final double shoulderX = shoulder?.x ?? 0;
+    final double elbowY = elbow?.y ?? 0;
+    final double hipY = hip?.y ?? 0;
+    final double noseY = nose?.y ?? 0;
+    final double noseX = nose?.x ?? 0;
+    final double earY = ear?.y ?? 0;
 
-    // ✋ Open Palm / Stop: wrist raised above shoulder
-    if (shoulder != null && wrist.y < shoulder.y - 50) {
-      return 'Open_Palm';
+    // Both wrists for two-handed gestures
+    final lW = leftWrist;
+    final rW = rightWrist;
+    final bothVisible =
+        lW != null && rW != null && lW.likelihood > 0.5 && rW.likelihood > 0.5;
+
+    // ── EMERGENCY — check first ────────────────────────
+
+    // 🚨 Cannot breathe — both hands on throat
+    // Both wrists near nose/throat level, close to face
+    if (bothVisible &&
+        lW.y < noseY + 60 &&
+        lW.y > noseY - 40 &&
+        rW.y < noseY + 60 &&
+        rW.y > noseY - 40 &&
+        (lW.x - noseX).abs() < 100 &&
+        (rW.x - noseX).abs() < 100) {
+      return 'Hands_on_throat';
     }
 
-    // 👍 Thumb Up: wrist above elbow, arm pointing up
-    if (elbow != null &&
-        wrist.y < elbow.y - 30 &&
-        nose != null &&
-        wrist.y < nose.y) {
-      return 'Thumb_Up';
+    // ⚠️ Allergic reaction — both wrists at shoulder, spread wide
+    if (bothVisible &&
+        lW.y.between(shoulderY - 30, shoulderY + 50) &&
+        rW.y.between(shoulderY - 30, shoulderY + 50) &&
+        (rW.x - lW.x).abs() > 200) {
+      return 'Allergic';
     }
 
-    // 👎 Thumb Down: wrist below elbow pointing down
-    if (elbow != null && wrist.y > elbow.y + 40) {
-      return 'Thumb_Down';
+    // ── TWO-HANDED GESTURES ────────────────────────────
+
+    // 😮‍💨 Difficulty breathing — both hands on chest
+    if (bothVisible &&
+        lW.y.between(shoulderY - 10, shoulderY + 100) &&
+        rW.y.between(shoulderY - 10, shoulderY + 100) &&
+        (lW.x - noseX).abs() < 120 &&
+        (rW.x - noseX).abs() < 120) {
+      return 'Both_hands_chest';
     }
 
-    // ☝️ Pointing: wrist raised to face level
-    if (nose != null && wrist.y < nose.y + 30 && wrist.y > nose.y - 80) {
-      return 'Pointing_Up';
-    }
-
-    // ✊ Fist/Pain: wrist near chest level
-    if (shoulder != null &&
-        wrist.y > shoulder.y - 20 &&
-        wrist.y < shoulder.y + 80) {
-      return 'Closed_Fist';
-    }
-    // ✋ Open Palm: wrist above shoulder
-    if (shoulder != null && wrist.y < shoulder.y - 50) {
-      return 'Open_Palm';
-    }
-
-    // ── NEW HOSPITAL GESTURES ─────────────────────────────
-
-    // 👋 Wave: wrist moves rapidly side to side above shoulder
-    // (detect by wrist being high + x position varying)
-    if (shoulder != null &&
-        wrist.y < shoulder.y &&
-        wrist.x > 200 &&
-        wrist.x < 500) {
-      return 'Wave';
-    }
-
-    // 💔 Hand on chest: wrist very close to chest/shoulder level
-    // and close to body center (x near nose x)
-    if (nose != null &&
-        shoulder != null &&
-        (wrist.y - shoulder.y).abs() < 40 &&
-        (wrist.x - nose.x).abs() < 80) {
-      return 'Hand_on_chest';
-    }
-
-    // 🤕 Head touch: wrist is at or above head (above nose)
-    if (nose != null && wrist.y < nose.y - 40) {
-      return 'Head_touch';
-    }
-
-    // 🥶 Arms crossed: both wrists visible and crossing midpoint
-    final leftW = landmarks[PoseLandmarkType.leftWrist];
-    final rightW = landmarks[PoseLandmarkType.rightWrist];
-    if (leftW != null && rightW != null) {
-      final midX = (leftW.x + rightW.x) / 2;
-      // Left wrist is to the right of midpoint = arms crossed
-      if (leftW.x > midX + 30 && rightW.x < midX - 30) {
+    // 🥶 Arms crossed — wrists crossing midpoint
+    if (bothVisible) {
+      final midX = (lW.x + rW.x) / 2;
+      if (lW.x > midX + 30 && rW.x < midX - 30) {
         return 'Arms_crossed';
       }
     }
 
-    // 🤢 Hand on belly: wrist below shoulder and near center
+    // 🛏️ Lie down — both wrists below hips, palms down
+    if (bothVisible && lW.y > hipY + 30 && rW.y > hipY + 30) {
+      return 'Palm_down';
+    }
+
+    // 🙋 Sit up — both wrists at mid torso, palms up
+    if (bothVisible &&
+        lW.y.between(shoulderY + 30, hipY - 30) &&
+        rW.y.between(shoulderY + 30, hipY - 30) &&
+        (rW.x - lW.x).abs() > 80) {
+      return 'Palm_up';
+    }
+
+    // ── SINGLE-HANDED GESTURES ─────────────────────────
+    // Ordered from most specific to least specific
+
+    // 🤕 Head touch — wrist above ear/head level
+    if (earY > 0 && wY < earY - 20) {
+      return 'Head_touch';
+    }
+
+    // 🗣️ Throat touch — wrist between nose and shoulder, near center
+    if (nose != null &&
+        shoulder != null &&
+        wY > noseY + 20 &&
+        wY < shoulderY - 10 &&
+        (wX - noseX).abs() < 70) {
+      return 'Throat_touch';
+    }
+
+    // 🤮 Hand over mouth — wrist at nose level, close to face
+    if (nose != null &&
+        wY.between(noseY - 20, noseY + 40) &&
+        (wX - noseX).abs() < 60) {
+      return 'Hand_over_mouth';
+    }
+
+    // ☝️ Pointing up — wrist at face level, arm extended
+    if (nose != null &&
+        wY < noseY + 30 &&
+        wY > noseY - 80 &&
+        elbow != null &&
+        wY < elbowY - 20) {
+      return 'Pointing_Up';
+    }
+
+    // ✋ Open palm / Stop — wrist raised above shoulder
+    if (shoulder != null && wY < shoulderY - 50) {
+      return 'Open_Palm';
+    }
+
+    // 📣 Call nurse — wrist high above shoulder, arm extended
+    if (shoulder != null && wY < shoulderY - 80) {
+      return 'Call_nurse';
+    }
+
+    // 👋 Wave — wrist above shoulder, x position near center
+    if (shoulder != null && wY < shoulderY && wX > 150 && wX < 600) {
+      return 'Wave';
+    }
+
+    // 👍 Thumb up — wrist above elbow, arm pointing up
+    if (elbow != null && nose != null && wY < elbowY - 30 && wY < noseY) {
+      return 'Thumb_Up';
+    }
+
+    // 👎 Thumb down — wrist below elbow, pointing down
+    if (elbow != null && wY > elbowY + 40) {
+      return 'Thumb_Down';
+    }
+
+    // 📈 Pain worse — wrist rising, elbow lower (arm going up)
+    if (elbow != null &&
+        shoulder != null &&
+        wY < elbowY - 10 &&
+        wY > shoulderY - 20 &&
+        wY < shoulderY + 40) {
+      return 'Pain_worse';
+    }
+
+    // 📉 Pain better — open palm lowering (arm going down)
+    if (elbow != null &&
+        shoulder != null &&
+        hip != null &&
+        wY > shoulderY + 40 &&
+        wY < hipY - 20) {
+      return 'Pain_better';
+    }
+
+    // 💔 Hand on chest — wrist near shoulder, close to body center
+    if (nose != null &&
+        shoulder != null &&
+        (wY - shoulderY).abs() < 50 &&
+        (wX - noseX).abs() < 90) {
+      return 'Hand_on_chest';
+    }
+
+    // 🩸 Point to wound — wrist at shoulder, arm extended sideways
+    if (shoulder != null &&
+        wY.between(shoulderY - 20, shoulderY + 80) &&
+        (wX - shoulderX).abs() > 100) {
+      return 'Point_wound';
+    }
+
+    // ✊ Closed fist / Pain — wrist near chest level
+    if (shoulder != null && wY > shoulderY - 20 && wY < shoulderY + 80) {
+      return 'Closed_Fist';
+    }
+
+    // 🫧 Cup area / Swelling — wrist below shoulder, cupped
+    if (shoulder != null &&
+        hip != null &&
+        wY.between(shoulderY + 40, hipY - 10) &&
+        (wX - noseX).abs() > 80) {
+      return 'Cup_area';
+    }
+
+    // 🦟 Scratch arm — wrist at elbow level, crossing body
+    if (elbow != null &&
+        wY.between(elbowY - 30, elbowY + 50) &&
+        (wX - (elbow.x)).abs() > 60) {
+      return 'Scratch_arm';
+    }
+
+    // 🍽️ Rub stomach — wrist well below shoulder near center
+    if (shoulder != null &&
+        hip != null &&
+        nose != null &&
+        wY > shoulderY + 80 &&
+        wY < hipY + 20 &&
+        (wX - noseX).abs() < 100) {
+      return 'Rub_stomach';
+    }
+
+    // 🤢 Hand on belly / Nausea — wrist below shoulder near center
     if (shoulder != null &&
         nose != null &&
-        wrist.y > shoulder.y + 60 &&
-        wrist.y < shoulder.y + 180 &&
-        (wrist.x - nose.x).abs() < 100) {
+        wY > shoulderY + 60 &&
+        wY < shoulderY + 180 &&
+        (wX - noseX).abs() < 100) {
       return 'Hand_on_belly';
+    }
+
+    // 🥵 Fan face — wrist at face level, arm to the side
+    if (nose != null &&
+        wY.between(noseY - 40, noseY + 60) &&
+        (wX - noseX).abs() > 80) {
+      return 'Fan_face';
+    }
+
+    // 😴 Sleep gesture — wrist near cheek/ear, tilted
+    if (earY > 0 &&
+        wY.between(earY - 20, earY + 60) &&
+        (wX - noseX).abs() < 80) {
+      return 'Sleep_gesture';
+    }
+
+    // 📞 Phone gesture — wrist near ear, like holding phone
+    if (earY > 0 &&
+        wY.between(earY - 30, earY + 50) &&
+        (wX - noseX).abs() > 60) {
+      return 'Phone_gesture';
+    }
+
+    // 💧 Water gesture — wrist at mouth/chin level
+    if (nose != null &&
+        wY.between(noseY + 20, noseY + 80) &&
+        (wX - noseX).abs() < 50) {
+      return 'Water_gesture';
+    }
+
+    // 💊 Medicine gesture — tap wrist (wrist at opposite wrist level)
+    if (bothVisible && (lW.y - rW.y).abs() < 40 && (lW.x - rW.x).abs() < 60) {
+      return 'Medicine_gesture';
+    }
+
+    // 🚽 Toilet gesture — wrist low, crossed legs approximation
+    if (hip != null && wY > hipY + 30 && (wX - noseX).abs() < 60) {
+      return 'Toilet_gesture';
+    }
+
+    // 😕 Confused — wrist pointing to head, shaking
+    if (earY > 0 &&
+        nose != null &&
+        wY.between(noseY - 60, earY + 30) &&
+        (wX - noseX).abs() > 60) {
+      return 'Confused';
+    }
+
+    // 🔁 Circle finger — wrist at shoulder level, arm extended
+    if (shoulder != null &&
+        elbow != null &&
+        wY.between(shoulderY - 40, shoulderY + 40) &&
+        (wX - shoulderX).abs() > 80) {
+      return 'Circle_finger';
+    }
+
+    // ✌️ Victory / OK — wrist at chest with arm not fully extended
+    if (elbow != null &&
+        shoulder != null &&
+        wY.between(shoulderY + 20, shoulderY + 100) &&
+        wY < elbowY) {
+      return 'Victory';
     }
 
     return 'None';
@@ -311,4 +567,9 @@ class GestureService {
     _controller = null;
     _isInitialized = false;
   }
+}
+
+// ── Extension helper ───────────────────────────────────
+extension DoubleRange on double {
+  bool between(double min, double max) => this >= min && this <= max;
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart' hide AuthProvider;
@@ -12,8 +13,6 @@ import '../../services/haptic_service.dart';
 import '../../services/firestore_service.dart';
 import '../../services/notification_service.dart';
 import '../../services/location_service.dart';
-import '../../services/notification_service.dart';
-import '../../services/location_service.dart';
 
 class PatientHomeScreen extends StatefulWidget {
   const PatientHomeScreen({super.key});
@@ -25,9 +24,10 @@ class PatientHomeScreen extends StatefulWidget {
 class _PatientHomeScreenState extends State<PatientHomeScreen> {
   int _lastMessageCount = 0;
   final _textCtrl = TextEditingController();
-  final _scrollCtrl = ScrollController(); // ✅ ADD THIS
+  final _scrollCtrl = ScrollController();
   bool _initialized = false;
   bool _isShowingDialog = false;
+  StreamSubscription<List<ChatRequestModel>>? _declinedCallsSub;
 
   final List<Map<String, String>> _gestures = [
     {'gesture': 'thumbs_up', 'label': '👍', 'text': 'Yes / I agree'},
@@ -64,10 +64,14 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
             );
         // ✅ FIX #1: Start REAL-TIME stream for incoming requests
         context.read<ChatRequestProvider>().listenForRequests(user.uid);
-        // Add to didChangeDependencies, after listenForRequests:
-        FirestoreService().getDeclinedCallsStream(user.uid).listen((calls) {
+        // Only show snackbars for declines that happen after this login.
+        final loginTime = DateTime.now();
+        _declinedCallsSub =
+            FirestoreService().getDeclinedCallsStream(user.uid).listen((calls) {
           for (final call in calls) {
-            if (call.declineReason != null && mounted) {
+            final isNew = call.declinedAt != null &&
+                call.declinedAt!.isAfter(loginTime);
+            if (isNew && call.declineReason != null && mounted) {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text(
@@ -91,6 +95,7 @@ class _PatientHomeScreenState extends State<PatientHomeScreen> {
 
   @override
   void dispose() {
+    _declinedCallsSub?.cancel();
     _textCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();

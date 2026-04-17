@@ -38,6 +38,127 @@ GESTURES_TO_COLLECT = [
         'name':        'Call Nurse',
         'instruction': 'Wave hand side to side above shoulder',
     },
+    {
+'folder':'HELLO',
+'name':'Hello',
+'instruction':'Wave hand infront of your face',
+    },
+    # ── NEW hospital gestures ─────────────────────────
+    {
+        'folder':      'HUNGRY',
+        'name':        'I Am Hungry',
+        'instruction': 'Rub your stomach in a circular motion',
+    },
+    {
+        'folder':      'THIRSTY',
+        'name':        'I Am Thirsty',
+        'instruction': 'Point to your throat with one finger',
+    },
+    {
+        'folder':      'HOT',
+        'name':        'I Feel Hot',
+        'instruction': 'Fan your face with your open hand',
+    },
+    {
+        'folder':      'COLD',
+        'name':        'I Feel Cold',
+        'instruction': 'Wrap arms around yourself and shiver',
+    },
+    {
+        'folder':      'TOILET',
+        'name':        'I Need Toilet',
+        'instruction': 'Cross your legs and point downward',
+    },
+    {
+        'folder':      'MEDICINE',
+        'name':        'I Need Medicine',
+        'instruction': 'Tap your inner wrist like checking pulse',
+    },
+    {
+        'folder':      'SLEEP',
+        'name':        'I Want to Sleep',
+        'instruction': 'Tilt your head and rest cheek on palm',
+    },
+    {
+        'folder':      'MORE_PAIN',
+        'name':        'Pain Getting Worse',
+        'instruction': 'Point to painful area then make fist',
+    },
+    {
+        'folder':      'LESS_PAIN',
+        'name':        'Pain Getting Better',
+        'instruction': 'Thumbs up then open palm slowly',
+    },
+    {
+        'folder':      'CANT_BREATHE',
+        'name':        'Cannot Breathe',
+        'instruction': 'Both hands on throat, lean forward',
+    },
+    {
+        'folder':      'VOMIT',
+        'name':        'Going to Vomit',
+        'instruction': 'Hand over mouth, lean forward slightly',
+    },
+    {
+        'folder':      'FAMILY',
+        'name':        'Call My Family',
+        'instruction': 'Point to ring finger then mime phone call',
+    },
+    {
+        'folder':      'THANK_YOU',
+        'name':        'Thank You',
+        'instruction': 'Flat hand from chin moving forward',
+    },
+    {
+        'folder':      'CONFUSED',
+        'name':        'I Am Confused',
+        'instruction': 'Point to head and shake side to side',
+    },
+    {
+        'folder':      'REPEAT',
+        'name':        'Please Repeat',
+        'instruction': 'Circle index finger in the air',
+    },
+    {
+        'folder':      'UNDERSTAND',
+        'name':        'I Understand',
+        'instruction': 'Index finger pointing up then nod',
+    },
+    {
+        'folder':      'DONT_UNDERSTAND',
+        'name':        'I Do Not Understand',
+        'instruction': 'Cross both index fingers in an X',
+    },
+    {
+        'folder':      'LYING_DOWN',
+        'name':        'I Want to Lie Down',
+        'instruction': 'Flat palm facing down, move downward',
+    },
+    {
+        'folder':      'SIT_UP',
+        'name':        'Help Me Sit Up',
+        'instruction': 'Flat palm facing up, move upward slowly',
+    },
+    {
+        'folder':      'BLEEDING',
+        'name':        'I Am Bleeding',
+        'instruction': 'Point to wound area with two fingers',
+    },
+    {
+        'folder':      'SWELLING',
+        'name':        'I Have Swelling',
+        'instruction': 'Cup both hands around affected area',
+    },
+    {
+        'folder':      'ITCHING',
+        'name':        'I Am Itching',
+        'instruction': 'Scratch arm with opposite hand fingers',
+    },
+    {
+        'folder':      'ALLERGIC',
+        'name':        'Allergic Reaction',
+        'instruction': 'Point to skin then wave hand away',
+    },
 ]
 
 

@@ -1,0 +1,48 @@
+HealthSign Gesture Classifier — Training Summary
+==================================================
+Run ID        : 20260414_155213
+
+Dataset
+-------
+Total samples : 7151
+Train         : 5005
+Validation    : 1073
+Test          : 1073
+Classes       : ['Call_Nurse', 'Chest_Pain', 'Closed_Fist', 'Difficulty_Breathing', 'Dizzy', 'Headache', 'ILoveYou', 'I_Feel_Cold', 'I_Need_Water', 'Nausea', 'Need_Medicine', 'Need_Restroom', 'Need_Water', 'No_Disagree', 'Open_Palm', 'Pointing_Up', 'Severe_Pain', 'Thumb_Up', 'Victory', 'hello']
+
+Training
+--------
+Epochs run    : 19
+Best val acc  : 100.00%
+Test accuracy : 99.44%
+Test loss     : 0.0283
+
+Model
+-----
+Input shape   : (63,) — 21 landmarks x (x, y, z)
+Output shape  : (20,) softmax
+TFLite size   : 66.9 KB
+Architecture  : Dense 256->128->64->32->20
+
+Class Mapping
+-------------
+  0: Call_Nurse
+  1: Chest_Pain
+  2: Closed_Fist
+  3: Difficulty_Breathing
+  4: Dizzy
+  5: Headache
+  6: ILoveYou
+  7: I_Feel_Cold
+  8: I_Need_Water
+  9: Nausea
+  10: Need_Medicine
+  11: Need_Restroom
+  12: Need_Water
+  13: No_Disagree
+  14: Open_Palm
+  15: Pointing_Up
+  16: Severe_Pain
+  17: Thumb_Up
+  18: Victory
+  19: hello

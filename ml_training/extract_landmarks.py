@@ -37,6 +37,32 @@ GESTURE_CLASSES = {
     'DIZZY':       'Dizzy',
     'BREATHLESS':  'Difficulty_Breathing',
     'CALL_NURSE':  'Call_Nurse',
+    'HELLO':'hello',
+    # ── Custom — NEW ──────────────────────────────────
+    'HUNGRY':         'I_Am_Hungry',
+    'THIRSTY':        'I_Am_Thirsty',
+    'HOT':            'I_Feel_Hot',
+    'COLD':           'I_Feel_Cold_Custom',
+    'TOILET':         'I_Need_Toilet',
+    'MEDICINE':       'I_Need_Medicine',
+    'SLEEP':          'I_Want_Sleep',
+    'MORE_PAIN':      'Pain_Getting_Worse',
+    'LESS_PAIN':      'Pain_Getting_Better',
+    'CANT_BREATHE':   'Cannot_Breathe',
+    'VOMIT':          'Going_To_Vomit',
+    'FAMILY':         'Call_My_Family',
+    'THANK_YOU':      'Thank_You',
+    'CONFUSED':       'I_Am_Confused',
+    'REPEAT':         'Please_Repeat',
+    'UNDERSTAND':     'I_Understand',
+    'DONT_UNDERSTAND':'I_Dont_Understand',
+    'LYING_DOWN':     'I_Want_To_Lie_Down',
+    'SIT_UP':         'Help_Me_Sit_Up',
+    'BLEEDING':       'I_Am_Bleeding',
+    'SWELLING':       'I_Have_Swelling',
+    'ITCHING':        'I_Am_Itching',
+    'ALLERGIC':       'Allergic_Reaction',
+
 }
 
 DATASET_PATH = Path('dataset/asl_alphabet_train/asl_alphabet_train')

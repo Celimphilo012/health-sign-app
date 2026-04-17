@@ -57,6 +57,7 @@ gesture_desc = {
     'Dizzy':              'I feel dizzy',
     'Difficulty_Breathing': 'Difficulty breathing',
     'Call_Nurse':         'Please call a nurse',
+    'Hello':'Hello / Hi',
 }
 
 

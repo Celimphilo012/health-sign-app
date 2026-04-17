@@ -15,6 +15,7 @@ class ChatRequestModel {
   final String urgency; // ← NEW
   final String initiatedBy;
   final String? declineReason;
+  final DateTime? declinedAt;
 
   ChatRequestModel({
     required this.id,
@@ -29,6 +30,7 @@ class ChatRequestModel {
     this.urgency = 'normal',
     this.initiatedBy = 'nurse',
     this.declineReason,
+    this.declinedAt,
   });
 
   factory ChatRequestModel.fromFirestore(DocumentSnapshot doc) {
@@ -48,6 +50,9 @@ class ChatRequestModel {
       urgency: data['urgency'] ?? 'normal',
       initiatedBy: data['initiatedBy'] ?? 'nurse',
       declineReason: data['declineReason'],
+      declinedAt: data['declinedAt'] != null
+          ? (data['declinedAt'] as Timestamp).toDate()
+          : null,
     );
   }
 
