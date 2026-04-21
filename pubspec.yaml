@@ -53,6 +53,9 @@ dependencies:
   #Botton Navigation Bar
   salomon_bottom_bar: ^3.3.2
 
+  # Charts
+  fl_chart: ^0.69.0
+
   # Location
   geolocator: ^13.0.1
   geocoding: ^3.0.0

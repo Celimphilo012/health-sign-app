@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:provider/provider.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../../models/user_model.dart';
 import '../../providers/auth_provider.dart';
 
@@ -29,6 +31,14 @@ class _AdminHomeScreenState extends State<AdminHomeScreen>
   int _totalNurses = 0;
   int _totalConversations = 0;
   int _totalRequests = 0;
+  int _acceptedRequests = 0;
+  int _declinedRequests = 0;
+  int _pendingRequests = 0;
+  int _endedRequests = 0;
+  int _normalRequests = 0;
+  int _emergencyRequests = 0;
+  int _disabledUsers = 0;
+  int _newUsersThisMonth = 0;
 
   StreamSubscription? _usersSub;
 
@@ -64,18 +74,39 @@ class _AdminHomeScreenState extends State<AdminHomeScreen>
   }
 
   Future<void> _loadStats() async {
+    final now = DateTime.now();
+    final startOfMonth = Timestamp.fromDate(DateTime(now.year, now.month, 1));
     final results = await Future.wait([
-      _db.collection('users').where('role', isEqualTo: 'patient').count().get(),
-      _db.collection('users').where('role', isEqualTo: 'nurse').count().get(),
-      _db.collection('conversations').count().get(),
-      _db.collection('chat_requests').count().get(),
+      _db.collection('users').where('role', isEqualTo: 'patient').count().get(),                                                   // 0
+      _db.collection('users').where('role', isEqualTo: 'nurse').count().get(),                                                    // 1
+      _db.collection('conversations').count().get(),                                                                               // 2
+      _db.collection('chat_requests').count().get(),                                                                               // 3
+      _db.collection('chat_requests').where('status', isEqualTo: 'accepted').count().get(),                                       // 4
+      _db.collection('chat_requests').where('status', isEqualTo: 'declined').count().get(),                                       // 5
+      _db.collection('chat_requests').where('status', isEqualTo: 'ended').count().get(),                                          // 6
+      _db.collection('chat_requests').where('urgency', isEqualTo: 'emergency').count().get(),                                     // 7
+      _db.collection('users').where('isDisabled', isEqualTo: true).count().get(),                                                 // 8
+      _db.collection('users').where('createdAt', isGreaterThanOrEqualTo: startOfMonth).count().get(),                             // 9
     ]);
     if (!mounted) return;
+    final total = results[3].count ?? 0;
+    final accepted = results[4].count ?? 0;
+    final declined = results[5].count ?? 0;
+    final ended = results[6].count ?? 0;
+    final emergency = results[7].count ?? 0;
     setState(() {
       _totalPatients = results[0].count ?? 0;
       _totalNurses = results[1].count ?? 0;
       _totalConversations = results[2].count ?? 0;
-      _totalRequests = results[3].count ?? 0;
+      _totalRequests = total;
+      _acceptedRequests = accepted;
+      _declinedRequests = declined;
+      _endedRequests = ended;
+      _pendingRequests = max(0, total - accepted - declined - ended);
+      _emergencyRequests = emergency;
+      _normalRequests = max(0, total - emergency);
+      _disabledUsers = results[8].count ?? 0;
+      _newUsersThisMonth = results[9].count ?? 0;
     });
   }
 
@@ -318,6 +349,14 @@ class _AdminHomeScreenState extends State<AdminHomeScreen>
             totalNurses: _totalNurses,
             totalConversations: _totalConversations,
             totalRequests: _totalRequests,
+            acceptedRequests: _acceptedRequests,
+            declinedRequests: _declinedRequests,
+            pendingRequests: _pendingRequests,
+            endedRequests: _endedRequests,
+            normalRequests: _normalRequests,
+            emergencyRequests: _emergencyRequests,
+            disabledUsers: _disabledUsers,
+            newUsersThisMonth: _newUsersThisMonth,
             onRefresh: _loadStats,
           ),
           const _RequestsTab(),
@@ -615,6 +654,14 @@ class _StatsTab extends StatelessWidget {
   final int totalNurses;
   final int totalConversations;
   final int totalRequests;
+  final int acceptedRequests;
+  final int declinedRequests;
+  final int pendingRequests;
+  final int endedRequests;
+  final int normalRequests;
+  final int emergencyRequests;
+  final int disabledUsers;
+  final int newUsersThisMonth;
   final VoidCallback onRefresh;
 
   const _StatsTab({
@@ -622,16 +669,65 @@ class _StatsTab extends StatelessWidget {
     required this.totalNurses,
     required this.totalConversations,
     required this.totalRequests,
+    required this.acceptedRequests,
+    required this.declinedRequests,
+    required this.pendingRequests,
+    required this.endedRequests,
+    required this.normalRequests,
+    required this.emergencyRequests,
+    required this.disabledUsers,
+    required this.newUsersThisMonth,
     required this.onRefresh,
   });
 
+  List<PieChartSectionData> _buildPieSections() {
+    if (totalRequests == 0) {
+      return [
+        PieChartSectionData(
+            value: 1,
+            color: const Color(0xFF30363D),
+            showTitle: false,
+            radius: 28)
+      ];
+    }
+    return [
+      if (acceptedRequests > 0)
+        PieChartSectionData(
+            value: acceptedRequests.toDouble(),
+            color: const Color(0xFF3FB950),
+            showTitle: false,
+            radius: 28),
+      if (declinedRequests > 0)
+        PieChartSectionData(
+            value: declinedRequests.toDouble(),
+            color: const Color(0xFFCF6679),
+            showTitle: false,
+            radius: 28),
+      if (pendingRequests > 0)
+        PieChartSectionData(
+            value: pendingRequests.toDouble(),
+            color: const Color(0xFFD29922),
+            showTitle: false,
+            radius: 28),
+      if (endedRequests > 0)
+        PieChartSectionData(
+            value: endedRequests.toDouble(),
+            color: const Color(0xFF8B949E),
+            showTitle: false,
+            radius: 28),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
+    final activeUsers = (totalPatients + totalNurses) - disabledUsers;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // ── Header ──
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
@@ -648,13 +744,15 @@ class _StatsTab extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 12),
+
+          // ── Overview grid ──
           GridView.count(
             crossAxisCount: 2,
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             crossAxisSpacing: 12,
             mainAxisSpacing: 12,
-            childAspectRatio: 1.4,
+            childAspectRatio: 1.5,
             children: [
               _StatCard(
                   label: 'Patients',
@@ -678,6 +776,140 @@ class _StatsTab extends StatelessWidget {
                   color: const Color(0xFFD29922)),
             ],
           ),
+          const SizedBox(height: 24),
+
+          // ── Call Requests Breakdown ──
+          const Text('Call Requests Breakdown',
+              style: TextStyle(
+                  color: Color(0xFFE6EDF3),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF161B22),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                  color: const Color(0xFF30363D).withOpacity(0.5)),
+            ),
+            child: totalRequests == 0
+                ? const Center(
+                    child: Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Text('No requests yet',
+                          style: TextStyle(color: Color(0xFF8B949E))),
+                    ),
+                  )
+                : Row(
+                    children: [
+                      SizedBox(
+                        height: 130,
+                        width: 130,
+                        child: PieChart(
+                          PieChartData(
+                            sectionsSpace: 3,
+                            centerSpaceRadius: 38,
+                            sections: _buildPieSections(),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 20),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            _LegendItem(
+                                color: const Color(0xFF3FB950),
+                                label: 'Accepted',
+                                value: acceptedRequests,
+                                total: totalRequests),
+                            _LegendItem(
+                                color: const Color(0xFFCF6679),
+                                label: 'Declined',
+                                value: declinedRequests,
+                                total: totalRequests),
+                            _LegendItem(
+                                color: const Color(0xFFD29922),
+                                label: 'Pending',
+                                value: pendingRequests,
+                                total: totalRequests),
+                            _LegendItem(
+                                color: const Color(0xFF8B949E),
+                                label: 'Ended',
+                                value: endedRequests,
+                                total: totalRequests),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+          const SizedBox(height: 24),
+
+          // ── Urgency Breakdown ──
+          const Text('Urgency',
+              style: TextStyle(
+                  color: Color(0xFFE6EDF3),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _StatCard(
+                    label: 'Normal',
+                    value: normalRequests,
+                    icon: Icons.notifications_outlined,
+                    color: const Color(0xFF3FB950)),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _StatCard(
+                    label: 'Emergency',
+                    value: emergencyRequests,
+                    icon: Icons.warning_amber_outlined,
+                    color: const Color(0xFFCF6679)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          // ── User Accounts ──
+          const Text('User Accounts',
+              style: TextStyle(
+                  color: Color(0xFFE6EDF3),
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: _StatCard(
+                    label: 'Active',
+                    value: activeUsers.clamp(0, totalPatients + totalNurses),
+                    icon: Icons.check_circle_outline,
+                    color: const Color(0xFF00BFA5)),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _StatCard(
+                    label: 'Disabled',
+                    value: disabledUsers,
+                    icon: Icons.block_outlined,
+                    color: const Color(0xFFCF6679)),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _StatCard(
+                    label: 'New This Month',
+                    value: newUsersThisMonth,
+                    icon: Icons.person_add_outlined,
+                    color: const Color(0xFF58A6FF)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
         ],
       ),
     );
@@ -700,7 +932,7 @@ class _StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: const Color(0xFF161B22),
         borderRadius: BorderRadius.circular(14),
@@ -708,22 +940,66 @@ class _StatCard extends StatelessWidget {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: color, size: 24),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('$value',
-                  style: TextStyle(
-                      color: color,
-                      fontSize: 28,
-                      fontWeight: FontWeight.bold)),
-              Text(label,
-                  style: const TextStyle(
-                      color: Color(0xFF8B949E), fontSize: 12)),
-            ],
+          Icon(icon, color: color, size: 22),
+          const SizedBox(height: 8),
+          Text('$value',
+              style: TextStyle(
+                  color: color,
+                  fontSize: 26,
+                  fontWeight: FontWeight.bold)),
+          Text(label,
+              style: const TextStyle(
+                  color: Color(0xFF8B949E), fontSize: 11),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
+        ],
+      ),
+    );
+  }
+}
+
+class _LegendItem extends StatelessWidget {
+  final Color color;
+  final String label;
+  final int value;
+  final int total;
+
+  const _LegendItem({
+    required this.color,
+    required this.label,
+    required this.value,
+    required this.total,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final pct = total > 0 ? (value / total * 100).round() : 0;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Row(
+        children: [
+          Container(
+              width: 10,
+              height: 10,
+              decoration:
+                  BoxDecoration(color: color, shape: BoxShape.circle)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(label,
+                style: const TextStyle(
+                    color: Color(0xFF8B949E), fontSize: 12)),
           ),
+          Text('$value',
+              style: TextStyle(
+                  color: color,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600)),
+          const SizedBox(width: 4),
+          Text('($pct%)',
+              style: const TextStyle(
+                  color: Color(0xFF8B949E), fontSize: 11)),
         ],
       ),
     );
